@@ -26,6 +26,10 @@
 # include <config.h>
 #endif
 
+#if defined(__ALTIVEC__) && !defined(_ARCH_PPC64)
+#include <altivec.h>
+#endif
+
 #include <float.h>
 #include "lame.h"
 #include "machine.h"
@@ -954,6 +958,108 @@ disable_FPE(void)
  *
  ***********************************************************************/
 
+#if defined(__ALTIVEC__) && !defined(_ARCH_PPC64)
+
+inline ieee754_float32_t fast_log10_altivec(ieee754_float32_t x)
+{
+    vector float va,vb,vc,vhalf,vzero,vsqrt2,vconst4;
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,vz,vz2,vlog;
+    vector unsigned int vconst1,vconst2,vshamt;
+    vector signed int vconst3;
+    float out __attribute__ ((aligned (16)));
+    
+    va = (vector float)VINIT4ALL(0.8685890659);
+    vb = (vector float)VINIT4ALL(0.2894672153);
+    vc = (vector float)VINIT4ALL(0.1793365895);
+    vhalf = (vector float)VINIT4ALL(0.15051499783);
+    vsqrt2 = (vector float)VINIT4ALL(1.4142135623731);
+    vconst4 = (vector float)VINIT4ALL(0.301029995664);
+    vzero = vec_xor(vzero,vzero);
+    vconst1 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(9));
+    vconst2 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(7));
+    vconst2 = vec_nor(vconst2,vconst2);
+    vconst3 = (vector signed int)vec_rl(vconst2,vec_splat_u32(7));
+    vshamt = vec_add(vec_splat_u32(9),vec_splat_u32(7));
+    vshamt = vec_add(vshamt,vec_splat_u32(7));
+    vconst2 = vec_sl((vector unsigned int)vconst3,vshamt);
+    
+    v1 = vec_ld(0,&x);
+    v2 = vec_perm(v1,v1,vec_lvsl(0,&x));
+    v3 = vec_splat(v2,0);
+    
+    v4 = (vector float)vec_sel(vconst2,(vector unsigned int)v3,vconst1);
+    v5 = vec_add(v4,vsqrt2);
+    v6 = vec_sub(v4,vsqrt2);
+    v7 = vec_re(v5);
+    vz = vec_madd(v6, vec_madd(vec_nmsub(v7,v5,(vector float)vconst2),v7,v7), vzero);
+    v8 = (vector float)vec_sr((vector unsigned int)v3,vshamt);
+    vlog = vec_ctf(vec_sub((vector signed int)v8,vconst3),0);
+    
+    vz2 = vec_madd(vz,vz,vzero);
+    vlog = vec_madd(vlog,vconst4,vhalf);
+    
+    v1 = vec_madd(vz2,vc,vb);
+    v2 = vec_madd(vz2,v1,va);
+    vlog = vec_madd(vz,v2,vlog);
+    
+    vec_ste(vlog,0,&out);
+    
+    return out;
+}
+
+inline ieee754_float32_t fast_loge_altivec(ieee754_float32_t x)
+{
+    vector float va,vb,vc,vhalf,vzero,vsqrt2,vconst4;
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,vz,vz2,vlog;
+    vector unsigned int vconst1,vconst2,vshamt;
+    vector signed int vconst3;
+    float out __attribute__ ((aligned (16)));
+    
+    va = (vector float)VINIT4ALL(2.0000006209);
+    vb = (vector float)VINIT4ALL(0.6664778517);
+    vc = (vector float)VINIT4ALL(0.4139745860);
+    vhalf = (vector float)VINIT4ALL(0.34657359028);
+    vsqrt2 = (vector float)VINIT4ALL(1.4142135623731);
+    vconst4 = (vector float)VINIT4ALL(0.6931471805599);
+    vzero = vec_xor(vzero,vzero);
+    vconst1 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(9));
+    vconst2 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(7));
+    vconst2 = vec_nor(vconst2,vconst2);
+    vconst3 = (vector signed int)vec_rl(vconst2,vec_splat_u32(7));
+    vshamt = vec_add(vec_splat_u32(9),vec_splat_u32(7));
+    vshamt = vec_add(vshamt,vec_splat_u32(7));
+    vconst2 = vec_sl((vector unsigned int)vconst3,vshamt);
+    
+    v1 = vec_ld(0,&x);
+    v2 = vec_perm(v1,v1,vec_lvsl(0,&x));
+    v3 = vec_splat(v2,0);
+    
+    v4 = (vector float)vec_sel(vconst2,(vector unsigned int)v3,vconst1);
+    v5 = vec_add(v4,vsqrt2);
+    v6 = vec_sub(v4,vsqrt2);
+    v7 = vec_re(v5);
+    vz = vec_madd(v6, vec_madd(vec_nmsub(v7,v5,(vector float)vconst2),v7,v7), vzero);
+    v8 = (vector float)vec_sr((vector unsigned int)v3,vshamt);
+    vlog = vec_ctf(vec_sub((vector signed int)v8,vconst3),0);
+    
+    vz2 = vec_madd(vz,vz,vzero);
+    vlog = vec_madd(vlog,vconst4,vhalf);
+    
+    v1 = vec_madd(vz2,vc,vb);
+    v2 = vec_madd(vz2,v1,va);
+    vlog = vec_madd(vz,v2,vlog);
+    
+    vec_ste(vlog,0,&out);
+    
+    return out;
+}
+
+void
+init_log_table(void)
+{
+}
+
+#else
 
 #define LOG2_SIZE       (512)
 #define LOG2_SIZE_L2    (9)
@@ -1003,6 +1109,8 @@ fast_log2(ieee754_float32_t x)
 
     return log2val;
 }
+
+#endif
 
 #else /* Don't use FAST_LOG */
 

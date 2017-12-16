@@ -30,6 +30,10 @@
 # include <config.h>
 #endif
 
+#if __ALTIVEC__
+#include <altivec.h>
+#endif
+
 #include "lame.h"
 #include "machine.h"
 #include "encoder.h"
@@ -39,7 +43,7 @@
 
 
 #ifndef USE_GOGO_SUBBAND
-static const FLOAT enwindow[] = {
+static const FLOAT enwindow[] __attribute__ ((aligned (16))) = {
     -4.77e-07 * 0.740951125354959 / 2.384e-06, 1.03951e-04 * 0.740951125354959 / 2.384e-06,
     9.53674e-04 * 0.740951125354959 / 2.384e-06, 2.841473e-03 * 0.740951125354959 / 2.384e-06,
     3.5758972e-02 * 0.740951125354959 / 2.384e-06, 3.401756e-03 * 0.740951125354959 / 2.384e-06, 9.83715e-04 * 0.740951125354959 / 2.384e-06, 9.9182e-05 * 0.740951125354959 / 2.384e-06, /* 15 */
@@ -230,7 +234,7 @@ static const FLOAT enwindow[] = {
 #define NS 12
 #define NL 36
 
-static const FLOAT win[4][NL] = {
+static const FLOAT win[4][NL] __attribute__ ((aligned (16))) = {
     {
      2.382191739347913e-13,
      6.423305872147834e-13,
@@ -435,6 +439,443 @@ window_subband(const sample_t * x1, FLOAT a[SBLIMIT])
 
     const sample_t *x2 = &x1[238 - 14 - 286];
 
+#if __ALTIVEC__
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
+    vector float vw1,vw2,vw3,vw4,vw5,vw6,vw7,vw8,vs,vt,vzero;
+    vector unsigned char vperm2,vperm3,vperm4,vperm5;
+    vzero = vec_xor(vzero,vzero);
+    vperm5 = (vector unsigned char)VINIT16(12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3);
+    vperm2 = vec_lvsl(0,wp+8);
+    vperm3 = (vector unsigned char)VINIT16(0,1,2,3,4,5,6,7,24,25,26,27,28,29,30,31);
+    vperm4 = vec_lvsl(0,x1+1);
+    vperm4 = vec_perm(vperm4,vperm4,vperm5);
+    
+    for(i=0;i<3;i++) {
+        v1 = vec_ld(0,wp-10);
+        v2 = vec_ld(16,wp-10);
+        v5 = vec_ld(0,wp+8);
+        v6 = vec_ld(16,wp+8);
+        v7 = vec_ld(32,wp+8);
+        v3 = vec_ld(0,wp+26);
+        v4 = vec_ld(16,wp+26);
+        v8 = vec_ld(0,wp+44);
+        v9 = vec_ld(16,wp+44);
+        v10 = vec_ld(32,wp+44);
+        
+        v5 = vec_perm(v5,v6,vperm2);
+        v6 = vec_perm(v6,v7,vperm2);
+        v7 = vec_perm(v8,v9,vperm2);
+        v8 = vec_perm(v9,v10,vperm2);
+        v9 = vec_mergeh(v1,v3);
+        v10 = vec_mergeh(v2,v4);
+        v11 = vec_mergeh(v5,v7);
+        v12 = vec_mergeh(v6,v8);
+        v13 = vec_mergel(v1,v3);
+        v14 = vec_mergel(v2,v4);
+        v15 = vec_mergel(v5,v7);
+        v16 = vec_mergel(v6,v8);
+        vw1 = vec_mergeh(v9,v11);
+        vw5 = vec_mergeh(v10,v12);
+        vw2 = vec_mergel(v9,v11);
+        vw6 = vec_mergel(v10,v12);
+        vw3 = vec_mergeh(v13,v15);
+        vw7 = vec_mergeh(v14,v16);
+        vw4 = vec_mergel(v13,v15);
+        vw8 = vec_mergel(v14,v16);
+        
+        v3 = vec_ld(0,x2-224);
+        vs = vec_madd(vw1,v3,vzero);
+        v4 = vec_ld(16,x1+221);
+        v5 = vec_ld(0,x1+221);
+        v6 = vec_perm(v5,v4,vperm4);
+        vt = vec_madd(vw1,v6,vzero);
+        
+        v3 = vec_ld(0,x2-160);
+        vs = vec_madd(vw2,v3,vs);
+        v4 = vec_ld(16,x1+157);
+        v5 = vec_ld(0,x1+157);
+        v6 = vec_perm(v5,v4,vperm4);
+        vt = vec_madd(vw2,v6,vt);
+        
+        v3 = vec_ld(0,x2-96);
+        vs = vec_madd(vw3,v3,vs);
+        v4 = vec_ld(16,x1+93);
+        v5 = vec_ld(0,x1+93);
+        v6 = vec_perm(v5,v4,vperm4);
+        vt = vec_madd(vw3,v6,vt);
+        
+        v3 = vec_ld(0,x2-32);
+        vs = vec_madd(vw4,v3,vs);
+        v4 = vec_ld(16,x1+29);
+        v5 = vec_ld(0,x1+29);
+        v6 = vec_perm(v5,v4,vperm4);
+        vt = vec_madd(vw4,v6,vt);
+        
+        
+        v3 = vec_ld(0,x2+32);
+        vs = vec_madd(vw5,v3,vs);
+        v4 = vec_ld(16,x1-35);
+        v5 = vec_ld(0,x1-35);
+        v6 = vec_perm(v5,v4,vperm4);
+        vt = vec_madd(vw5,v6,vt);
+        
+        v3 = vec_ld(0,x2+96);
+        vs = vec_madd(vw6,v3,vs);
+        v4 = vec_ld(16,x1-99);
+        v5 = vec_ld(0,x1-99);
+        v6 = vec_perm(v5,v4,vperm4);
+        vt = vec_madd(vw6,v6,vt);
+        
+        v3 = vec_ld(0,x2+160);
+        vs = vec_madd(vw7,v3,vs);
+        v4 = vec_ld(16,x1-163);
+        v5 = vec_ld(0,x1-163);
+        v6 = vec_perm(v5,v4,vperm4);
+        vt = vec_madd(vw7,v6,vt);
+        
+        v3 = vec_ld(0,x2+224);
+        vs = vec_madd(vw8,v3,vs);
+        v4 = vec_ld(16,x1-227);
+        v5 = vec_ld(0,x1-227);
+        v6 = vec_perm(v5,v4,vperm4);
+        vt = vec_madd(vw8,v6,vt);
+        
+        
+        v1 = vec_ld(0,wp-2);
+        v2 = vec_ld(16,wp-2);
+        v5 = vec_ld(0,wp+16);
+        v6 = vec_ld(16,wp+16);
+        v7 = vec_ld(32,wp+16);
+        v3 = vec_ld(0,wp+34);
+        v4 = vec_ld(16,wp+34);
+        v8 = vec_ld(0,wp+52);
+        v9 = vec_ld(16,wp+52);
+        v10 = vec_ld(32,wp+52);
+        
+        v5 = vec_perm(v5,v6,vperm2);
+        v6 = vec_perm(v6,v7,vperm2);
+        v7 = vec_perm(v8,v9,vperm2);
+        v8 = vec_perm(v9,v10,vperm2);
+        v9 = vec_mergeh(v1,v3);
+        v10 = vec_mergeh(v2,v4);
+        v11 = vec_mergeh(v5,v7);
+        v12 = vec_mergeh(v6,v8);
+        v13 = vec_mergel(v1,v3);
+        v14 = vec_mergel(v2,v4);
+        v15 = vec_mergel(v5,v7);
+        v16 = vec_mergel(v6,v8);
+        vw1 = vec_mergeh(v9,v11);
+        vw5 = vec_mergeh(v10,v12);
+        vw2 = vec_mergel(v9,v11);
+        vw6 = vec_mergel(v10,v12);
+        vw3 = vec_mergeh(v13,v15);
+        vw7 = vec_mergeh(v14,v16);
+        vw4 = vec_mergel(v13,v15);
+        vw8 = vec_mergel(v14,v16);
+        
+        v3 = vec_ld(0,x2+256);
+        vt = vec_nmsub(vw1,v3,vt);
+        v4 = vec_ld(16,x1-259);
+        v5 = vec_ld(0,x1-259);
+        v6 = vec_perm(v5,v4,vperm4);
+        vs = vec_madd(vw1,v6,vs);
+        
+        v3 = vec_ld(0,x2+192);
+        vt = vec_nmsub(vw2,v3,vt);
+        v4 = vec_ld(16,x1-195);
+        v5 = vec_ld(0,x1-195);
+        v6 = vec_perm(v5,v4,vperm4);
+        vs = vec_madd(vw2,v6,vs);
+        
+        v3 = vec_ld(0,x2+128);
+        vt = vec_nmsub(vw3,v3,vt);
+        v4 = vec_ld(16,x1-131);
+        v5 = vec_ld(0,x1-131);
+        v6 = vec_perm(v5,v4,vperm4);
+        vs = vec_madd(vw3,v6,vs);
+        
+        v3 = vec_ld(0,x2+64);
+        vt = vec_nmsub(vw4,v3,vt);
+        v4 = vec_ld(16,x1-67);
+        v5 = vec_ld(0,x1-67);
+        v6 = vec_perm(v5,v4,vperm4);
+        vs = vec_madd(vw4,v6,vs);
+        
+        
+        v3 = vec_ld(0,x2);
+        vt = vec_nmsub(vw5,v3,vt);
+        v4 = vec_ld(16,x1-3);
+        v5 = vec_ld(0,x1-3);
+        v6 = vec_perm(v5,v4,vperm4);
+        vs = vec_madd(vw5,v6,vs);
+        
+        v3 = vec_ld(0,x2-64);
+        vt = vec_nmsub(vw6,v3,vt);
+        v4 = vec_ld(16,x1+61);
+        v5 = vec_ld(0,x1+61);
+        v6 = vec_perm(v5,v4,vperm4);
+        vs = vec_madd(vw6,v6,vs);
+        
+        v3 = vec_ld(0,x2-128);
+        vt = vec_nmsub(vw7,v3,vt);
+        v4 = vec_ld(16,x1+125);
+        v5 = vec_ld(0,x1+125);
+        v6 = vec_perm(v5,v4,vperm4);
+        vs = vec_madd(vw7,v6,vs);
+        
+        v3 = vec_ld(0,x2-192);
+        vt = vec_nmsub(vw8,v3,vt);
+        v4 = vec_ld(16,x1+189);
+        v5 = vec_ld(0,x1+189);
+        v6 = vec_perm(v5,v4,vperm4);
+        vs = vec_madd(vw8,v6,vs);
+        
+        /*end*/
+        
+        v3 = vec_ld(0,wp+6);
+        
+        v4 = vec_ld(0,wp+24);
+        v5 = vec_ld(16,wp+24);
+        v6 = vec_perm(v4,v5,vperm2);
+        
+        v9 = vec_ld(0,wp+42);
+        
+        v10 = vec_ld(0,wp+60);
+        v11 = vec_ld(16,wp+60);
+        v12 = vec_perm(v10,v11,vperm2);
+        
+        v13 = vec_mergeh(v3,v9);
+        v14 = vec_mergeh(v6,v12);;
+        vw1 = vec_mergeh(v13,v14);
+        vw2 = vec_mergel(v13,v14);
+        
+        vs = vec_madd(vs,vw1,vzero);
+        v1 = vec_sub(vt,vs);
+        v2 = vec_add(vt,vs);
+        v3 = vec_madd(vw2,v1,vzero);
+        v4 = vec_mergeh(v2,v3);
+        v5 = vec_mergel(v2,v3);
+        vec_st(v4,0,a+i*8);
+        vec_st(v5,16,a+i*8);
+        
+        wp += 72;
+        x1-=4;
+        x2+=4;
+    }
+    
+    v1 = vec_ld(0,wp-10);
+    v2 = vec_ld(16,wp-10);
+    v5 = vec_ld(0,wp+8);
+    v6 = vec_ld(16,wp+8);
+    v7 = vec_ld(32,wp+8);
+    v3 = vec_ld(0,wp+26);
+    v4 = vec_ld(16,wp+26);
+    v8 = vec_ld(0,wp+44);
+    v9 = vec_ld(16,wp+44);
+    v10 = vec_ld(32,wp+44);
+    
+    v5 = vec_perm(v5,v6,vperm2);
+    v6 = vec_perm(v6,v7,vperm2);
+    v7 = vec_perm(v8,v9,vperm2);
+    v8 = vec_perm(v9,v10,vperm2);
+    v9 = vec_mergeh(v1,v3);
+    v10 = vec_mergeh(v2,v4);
+    v11 = vec_mergeh(v5,v7);
+    v12 = vec_mergeh(v6,v8);
+    v13 = vec_mergel(v1,v3);
+    v14 = vec_mergel(v2,v4);
+    v15 = vec_mergel(v5,v7);
+    v16 = vec_mergel(v6,v8);
+    vw1 = vec_mergeh(v9,v11);
+    vw5 = vec_mergeh(v10,v12);
+    vw2 = vec_mergel(v9,v11);
+    vw6 = vec_mergel(v10,v12);
+    vw3 = vec_mergeh(v13,v15);
+    vw7 = vec_mergeh(v14,v16);
+    vw4 = vec_mergel(v13,v15);
+    vw8 = vec_mergel(v14,v16);
+    
+    v3 = vec_ld(0,x2-224);
+    vs = vec_madd(vw1,v3,vzero);
+    v4 = vec_ld(16,x1+221);
+    v5 = vec_ld(0,x1+221);
+    v6 = vec_perm(v5,v4,vperm4);
+    vt = vec_madd(vw1,v6,vzero);
+    
+    v3 = vec_ld(0,x2-160);
+    vs = vec_madd(vw2,v3,vs);
+    v4 = vec_ld(16,x1+157);
+    v5 = vec_ld(0,x1+157);
+    v6 = vec_perm(v5,v4,vperm4);
+    vt = vec_madd(vw2,v6,vt);
+    
+    v3 = vec_ld(0,x2-96);
+    vs = vec_madd(vw3,v3,vs);
+    v4 = vec_ld(16,x1+93);
+    v5 = vec_ld(0,x1+93);
+    v6 = vec_perm(v5,v4,vperm4);
+    vt = vec_madd(vw3,v6,vt);
+    
+    v3 = vec_ld(0,x2-32);
+    vs = vec_madd(vw4,v3,vs);
+    v4 = vec_ld(16,x1+29);
+    v5 = vec_ld(0,x1+29);
+    v6 = vec_perm(v5,v4,vperm4);
+    vt = vec_madd(vw4,v6,vt);
+    
+    
+    v3 = vec_ld(0,x2+32);
+    vs = vec_madd(vw5,v3,vs);
+    v4 = vec_ld(16,x1-35);
+    v5 = vec_ld(0,x1-35);
+    v6 = vec_perm(v5,v4,vperm4);
+    vt = vec_madd(vw5,v6,vt);
+    
+    v3 = vec_ld(0,x2+96);
+    vs = vec_madd(vw6,v3,vs);
+    v4 = vec_ld(16,x1-99);
+    v5 = vec_ld(0,x1-99);
+    v6 = vec_perm(v5,v4,vperm4);
+    vt = vec_madd(vw6,v6,vt);
+    
+    v3 = vec_ld(0,x2+160);
+    vs = vec_madd(vw7,v3,vs);
+    v4 = vec_ld(16,x1-163);
+    v5 = vec_ld(0,x1-163);
+    v6 = vec_perm(v5,v4,vperm4);
+    vt = vec_madd(vw7,v6,vt);
+    
+    v3 = vec_ld(0,x2+224);
+    vs = vec_madd(vw8,v3,vs);
+    v4 = vec_ld(16,x1-227);
+    v5 = vec_ld(0,x1-227);
+    v6 = vec_perm(v5,v4,vperm4);
+    vt = vec_madd(vw8,v6,vt);
+    
+    
+    v1 = vec_ld(0,wp-2);
+    v2 = vec_ld(16,wp-2);
+    v5 = vec_ld(0,wp+16);
+    v6 = vec_ld(16,wp+16);
+    v7 = vec_ld(32,wp+16);
+    v3 = vec_ld(0,wp+34);
+    v4 = vec_ld(16,wp+34);
+    v8 = vec_ld(0,wp+52);
+    v9 = vec_ld(16,wp+52);
+    v10 = vec_ld(32,wp+52);
+    
+    v5 = vec_perm(v5,v6,vperm2);
+    v6 = vec_perm(v6,v7,vperm2);
+    v7 = vec_perm(v8,v9,vperm2);
+    v8 = vec_perm(v9,v10,vperm2);
+    v9 = vec_mergeh(v1,v3);
+    v10 = vec_mergeh(v2,v4);
+    v11 = vec_mergeh(v5,v7);
+    v12 = vec_mergeh(v6,v8);
+    v13 = vec_mergel(v1,v3);
+    v14 = vec_mergel(v2,v4);
+    v15 = vec_mergel(v5,v7);
+    v16 = vec_mergel(v6,v8);
+    vw1 = vec_mergeh(v9,v11);
+    vw5 = vec_mergeh(v10,v12);
+    vw2 = vec_mergel(v9,v11);
+    vw6 = vec_mergel(v10,v12);
+    vw3 = vec_mergeh(v13,v15);
+    vw7 = vec_mergeh(v14,v16);
+    vw4 = vec_mergel(v13,v15);
+    vw8 = vec_mergel(v14,v16);
+    
+    v3 = vec_ld(0,x2+256);
+    vt = vec_nmsub(vw1,v3,vt);
+    v4 = vec_ld(16,x1-259);
+    v5 = vec_ld(0,x1-259);
+    v6 = vec_perm(v5,v4,vperm4);
+    vs = vec_madd(vw1,v6,vs);
+    
+    v3 = vec_ld(0,x2+192);
+    vt = vec_nmsub(vw2,v3,vt);
+    v4 = vec_ld(16,x1-195);
+    v5 = vec_ld(0,x1-195);
+    v6 = vec_perm(v5,v4,vperm4);
+    vs = vec_madd(vw2,v6,vs);
+    
+    v3 = vec_ld(0,x2+128);
+    vt = vec_nmsub(vw3,v3,vt);
+    v4 = vec_ld(16,x1-131);
+    v5 = vec_ld(0,x1-131);
+    v6 = vec_perm(v5,v4,vperm4);
+    vs = vec_madd(vw3,v6,vs);
+    
+    v3 = vec_ld(0,x2+64);
+    vt = vec_nmsub(vw4,v3,vt);
+    v4 = vec_ld(16,x1-67);
+    v5 = vec_ld(0,x1-67);
+    v6 = vec_perm(v5,v4,vperm4);
+    vs = vec_madd(vw4,v6,vs);
+    
+    
+    v3 = vec_ld(0,x2);
+    vt = vec_nmsub(vw5,v3,vt);
+    v4 = vec_ld(16,x1-3);
+    v5 = vec_ld(0,x1-3);
+    v6 = vec_perm(v5,v4,vperm4);
+    vs = vec_madd(vw5,v6,vs);
+    
+    v3 = vec_ld(0,x2-64);
+    vt = vec_nmsub(vw6,v3,vt);
+    v4 = vec_ld(16,x1+61);
+    v5 = vec_ld(0,x1+61);
+    v6 = vec_perm(v5,v4,vperm4);
+    vs = vec_madd(vw6,v6,vs);
+    
+    v3 = vec_ld(0,x2-128);
+    vt = vec_nmsub(vw7,v3,vt);
+    v4 = vec_ld(16,x1+125);
+    v5 = vec_ld(0,x1+125);
+    v6 = vec_perm(v5,v4,vperm4);
+    vs = vec_madd(vw7,v6,vs);
+    
+    v3 = vec_ld(0,x2-192);
+    vt = vec_nmsub(vw8,v3,vt);
+    v4 = vec_ld(16,x1+189);
+    v5 = vec_ld(0,x1+189);
+    v6 = vec_perm(v5,v4,vperm4);
+    vs = vec_madd(vw8,v6,vs);
+    
+    /*end*/
+    
+    v3 = vec_ld(0,wp+6);
+    
+    v4 = vec_ld(0,wp+24);
+    v5 = vec_ld(16,wp+24);
+    v6 = vec_perm(v4,v5,vperm2);
+    
+    v9 = vec_ld(0,wp+42);
+    
+    v10 = vec_ld(0,wp+60);
+    v11 = vec_ld(16,wp+60);
+    v12 = vec_perm(v10,v11,vperm2);
+    
+    v13 = vec_mergeh(v3,v9);
+    v14 = vec_mergeh(v6,v12);;
+    vw1 = vec_mergeh(v13,v14);
+    vw2 = vec_mergel(v13,v14);
+    
+    vs = vec_madd(vs,vw1,vzero);
+    v1 = vec_sub(vt,vs);
+    v2 = vec_add(vt,vs);
+    v3 = vec_madd(vw2,v1,vzero);
+    v4 = vec_ld(16,a+24);
+    v5 = vec_mergeh(v2,v3);
+    v6 = vec_mergel(v2,v3);
+    v7 = vec_perm(v6,v4,vperm3);
+    vec_st(v5,0,a+24);
+    vec_st(v7,16,a+24);
+    
+    wp += 54;
+    x1-=3;
+    x2+=3;
+#else
     for (i = -15; i < 0; i++) {
         FLOAT   w, s, t;
 
@@ -501,6 +942,7 @@ window_subband(const sample_t * x1, FLOAT a[SBLIMIT])
         x1--;
         x2++;
     }
+#endif
     {
         FLOAT   s, t, u, v;
         t = x1[-16] * wp[-10];

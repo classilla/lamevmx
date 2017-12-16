@@ -146,6 +146,10 @@ blocktype_d[2]        block type to use for previous granule
 
 #include <float.h>
 
+#if __ALTIVEC__
+#include <altivec.h>
+#endif
+
 #include "lame.h"
 #include "machine.h"
 #include "encoder.h"
@@ -162,6 +166,48 @@ blocktype_d[2]        block type to use for previous granule
 #define  LN_TO_LOG10  (M_LN10/10)
 #else
 #define  LN_TO_LOG10  0.2302585093
+#endif
+
+#if __ALTIVEC__
+static inline vector float fast_log10_altivec_2(vector float v3)
+{
+    vector float va,vb,vc,vhalf,vzero,vsqrt2,vconst4;
+    vector float v1,v2,v4,v5,v6,v7,v8,vz,vz2,vlog;
+    vector unsigned int vconst1,vconst2,vshamt;
+    vector signed int vconst3;
+    
+    va = (vector float)VINIT4ALL(0.8685890659);
+    vb = (vector float)VINIT4ALL(0.2894672153);
+    vc = (vector float)VINIT4ALL(0.1793365895);
+    vhalf = (vector float)VINIT4ALL(0.15051499783);
+    vsqrt2 = (vector float)VINIT4ALL(1.4142135623731);
+    vconst4 = (vector float)VINIT4ALL(0.301029995664);
+    vzero = vec_xor(vzero,vzero);
+    vconst1 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(9));
+    vconst2 = (vector unsigned int)vec_sr(vec_splat_s32(-1),vec_splat_u32(7));
+    vconst2 = vec_nor(vconst2,vconst2);
+    vconst3 = (vector signed int)vec_rl(vconst2,vec_splat_u32(7));
+    vshamt = vec_add(vec_splat_u32(9),vec_splat_u32(7));
+    vshamt = vec_add(vshamt,vec_splat_u32(7));
+    vconst2 = vec_sl((vector unsigned int)vconst3,vshamt);
+    
+    v4 = (vector float)vec_sel(vconst2,(vector unsigned int)v3,vconst1);
+    v5 = vec_add(v4,vsqrt2);
+    v6 = vec_sub(v4,vsqrt2);
+    v7 = vec_re(v5);
+    vz = vec_madd(v6, vec_madd(vec_nmsub(v7,v5,(vector float)vconst2),v7,v7), vzero);
+    v8 = (vector float)vec_sr((vector unsigned int)v3,vshamt);
+    vlog = vec_ctf(vec_sub((vector signed int)v8,vconst3),0);
+    
+    vz2 = vec_madd(vz,vz,vzero);
+    vlog = vec_madd(vlog,vconst4,vhalf);
+    
+    v1 = vec_madd(vz2,vc,vb);
+    v2 = vec_madd(vz2,v1,va);
+    vlog = vec_madd(vz,v2,vlog);
+    
+    return vlog;
+}
 #endif
 
 
@@ -253,6 +299,11 @@ static const FLOAT ma_max_i1 = 3.6517412725483771;
 static const FLOAT ma_max_i2 = 31.622776601683793;
 /* pow(10, (MLIMIT) / 10.0); */
 static const FLOAT ma_max_m  = 31.622776601683793;
+#if __ALTIVEC__
+static const vector float vmamax1 = (vector float)VINIT4ALL(3.651741);
+static const vector float vmamax2 = (vector float)VINIT4ALL(31.622777);
+#endif
+
 
     /*This is the masking table:
        According to tonality, values are going from 0dB (TMN)
@@ -666,6 +717,14 @@ static void
 vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2], int chn,
                      int gr_out, FLOAT fftenergy[HBLKSIZE], FLOAT(*wsamp_l)[BLKSIZE])
 {
+#if __ALTIVEC__
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,vhalf,vprev,vzero,vsqrt2;
+    vector unsigned char vperm;
+    vhalf = vec_ctf(vec_splat_s32(1),1);
+    vsqrt2 = (vector float)VINIT4ALL(0.7071067811865001);
+    vzero = vec_xor(vzero,vzero);
+    vperm = (vector unsigned char)VINIT16(0,1,2,3,28,29,30,31,24,25,26,27,20,21,22,23);
+#endif
     SessionConfig_t const *const cfg = &gfc->cfg;
     PsyStateVar_t *psv = &gfc->sv_psy;
     plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
@@ -675,19 +734,80 @@ vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2]
         fft_long(gfc, *wsamp_l, chn, buffer);
     }
     else if (chn == 2) {
-        FLOAT const sqrt2_half = SQRT2 * 0.5f;
         /* FFT data for mid and side channel is derived from L & R */
+#if __ALTIVEC__
+        for(j = 0; j < BLKSIZE; j += 8) {
+            v1 = vec_ld(0,wsamp_l[0]+j);
+            v2 = vec_ld(0,wsamp_l[1]+j);
+            v3 = vec_ld(16,wsamp_l[0]+j);
+            v4 = vec_ld(16,wsamp_l[1]+j);
+            
+            v5 = vec_add(v1,v2);
+            v6 = vec_sub(v1,v2);
+            v7 = vec_add(v3,v4);
+            v8 = vec_sub(v3,v4);
+            v9 = vec_madd(v5,vsqrt2,vzero);
+            v10 = vec_madd(v6,vsqrt2,vzero);
+            v11 = vec_madd(v7,vsqrt2,vzero);
+            v12 = vec_madd(v8,vsqrt2,vzero);
+            
+            vec_st(v9,0,wsamp_l[0]+j);
+            vec_st(v10,0,wsamp_l[1]+j);
+            vec_st(v11,16,wsamp_l[0]+j);
+            vec_st(v12,16,wsamp_l[1]+j);
+        }
+#else
+        FLOAT const sqrt2_half = SQRT2 * 0.5f;
         for (j = BLKSIZE - 1; j >= 0; --j) {
             FLOAT const l = wsamp_l[0][j];
             FLOAT const r = wsamp_l[1][j];
             wsamp_l[0][j] = (l + r) * sqrt2_half;
             wsamp_l[1][j] = (l - r) * sqrt2_half;
         }
+#endif
     }
 
     /*********************************************************************
     *  compute energies
     *********************************************************************/
+#if __ALTIVEC__
+    vprev = vec_ld(0,(*wsamp_l));
+    for(j = 0; j < BLKSIZE/2; j += 16) {
+        v1 = vec_ld(0,(*wsamp_l)+j);
+        v2 = vec_ld(16,(*wsamp_l)+j);
+        v3 = vec_ld(32,(*wsamp_l)+j);
+        v4 = vec_ld(48,(*wsamp_l)+j);
+        v5 = vec_ld(48,(*wsamp_l)+1008-j);
+        v6 = vec_ld(32,(*wsamp_l)+1008-j);
+        v7 = vec_ld(16,(*wsamp_l)+1008-j);
+        v8 = vec_ld(0,(*wsamp_l)+1008-j);
+        v9 = vec_perm(vprev,v5,vperm);
+        v10 = vec_perm(v5,v6,vperm);
+        v11 = vec_perm(v6,v7,vperm);
+        v12 = vec_perm(v7,v8,vperm);
+        vprev = v8;
+        v1 = vec_madd(v1,v1,vzero);
+        v2 = vec_madd(v2,v2,vzero);
+        v3 = vec_madd(v3,v3,vzero);
+        v4 = vec_madd(v4,v4,vzero);
+        v5 = vec_madd(v9,v9,v1);
+        v6 = vec_madd(v10,v10,v2);
+        v7 = vec_madd(v11,v11,v3);
+        v8 = vec_madd(v12,v12,v4);
+        v9 = vec_madd(v5,vhalf,vzero);
+        v10 = vec_madd(v6,vhalf,vzero);
+        v11 = vec_madd(v7,vhalf,vzero);
+        v12 = vec_madd(v8,vhalf,vzero);
+        
+        vec_st(v9,0,fftenergy+j);
+        vec_st(v10,16,fftenergy+j);
+        vec_st(v11,32,fftenergy+j);
+        vec_st(v12,48,fftenergy+j);
+    }
+    
+    v1 = vec_madd(vprev,vprev,vzero);
+    vec_ste(v1,0,fftenergy+j);
+#else
     fftenergy[0] = wsamp_l[0][0];
     fftenergy[0] *= fftenergy[0];
 
@@ -696,13 +816,51 @@ vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2]
         FLOAT const im = (*wsamp_l)[BLKSIZE / 2 + j];
         fftenergy[BLKSIZE / 2 - j] = (re * re + im * im) * 0.5f;
     }
+#endif
     /* total energy */
     {
+#if __ALTIVEC__
+#if _ARCH_PPC64
+        v5 = vec_ld(0,fftenergy+8);
+        v6 = vec_ld(0,fftenergy+508);
+        v7 = vec_ld(0,fftenergy+512);
+        v8 = vec_xor(v8,v8);
+        v5 = vec_sld(v5,v8,12);
+        v7 = vec_sld(v8,v7,4);
+#else
+        v5 = vec_lde(0,fftenergy+11);
+        v6 = vec_ld(0,fftenergy+508);
+        v7 = vec_lde(0,fftenergy+512);
+        v8 = vec_xor(v8,v8);
+#endif
+        for(j=12;j<508;j+=16) {
+            v1 = vec_ld(0,fftenergy+j);
+            v2 = vec_ld(16,fftenergy+j);
+            v3 = vec_ld(32,fftenergy+j);
+            v4 = vec_ld(48,fftenergy+j);
+            v5 = vec_add(v1,v5);
+            v6 = vec_add(v2,v6);
+            v7 = vec_add(v3,v7);
+            v8 = vec_add(v4,v8);
+        }
+        v5 = vec_add(v5,v6);
+        v7 = vec_add(v7,v8);
+        v5 = vec_add(v5,v7);
+        v6 = vec_sld(v5,v5,4);
+        v7 = vec_sld(v5,v5,8);
+        v8 = vec_sld(v5,v5,12);
+        v5 = vec_add(v5,v6);
+        v7 = vec_add(v7,v8);
+        v5 = vec_add(v5,v7);
+        v5 = vec_perm(v5,v5,vec_lvsr(0, psv->tot_ener+chn));
+        vec_ste(v5,0,psv->tot_ener+chn);
+#else
         FLOAT   totalenergy = 0.0f;
         for (j = 11; j < HBLKSIZE; j++)
             totalenergy += fftenergy[j];
 
         psv->tot_ener[chn] = totalenergy;
+#endif
     }
 
     if (plt) {
@@ -716,27 +874,96 @@ vbrpsy_compute_fft_l(lame_internal_flags * gfc, const sample_t * const buffer[2]
 
 static void
 vbrpsy_compute_fft_s(lame_internal_flags const *gfc, const sample_t * const buffer[2], int chn,
-                     int sblock, FLOAT(*fftenergy_s)[HBLKSIZE_s], FLOAT(*wsamp_s)[3][BLKSIZE_s])
+                     int sblock, FLOAT(*fftenergy_s)[HBLKSIZE_s+3], FLOAT(*wsamp_s)[3][BLKSIZE_s])
 {
+#if __ALTIVEC__
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,vhalf,vprev,vzero,vsqrt2;
+    vector unsigned char vperm;
+    vhalf = vec_ctf(vec_splat_s32(1),1);
+    vsqrt2 = (vector float)VINIT4ALL(0.7071067811865001);
+    vzero = vec_xor(vzero,vzero);
+    vperm = (vector unsigned char)VINIT16(0,1,2,3,28,29,30,31,24,25,26,27,20,21,22,23);
+#endif
     int     j;
 
     if (sblock == 0 && chn < 2) {
         fft_short(gfc, *wsamp_s, chn, buffer);
     }
     if (chn == 2) {
-        FLOAT const sqrt2_half = SQRT2 * 0.5f;
         /* FFT data for mid and side channel is derived from L & R */
+#if __ALTIVEC__
+        for(j = 0; j < BLKSIZE_s; j += 8) {
+            v1 = vec_ld(0,wsamp_s[0][sblock]+j);
+            v2 = vec_ld(0,wsamp_s[1][sblock]+j);
+            v3 = vec_ld(16,wsamp_s[0][sblock]+j);
+            v4 = vec_ld(16,wsamp_s[1][sblock]+j);
+            
+            v5 = vec_add(v1,v2);
+            v6 = vec_sub(v1,v2);
+            v7 = vec_add(v3,v4);
+            v8 = vec_sub(v3,v4);
+            v9 = vec_madd(v5,vsqrt2,vzero);
+            v10 = vec_madd(v6,vsqrt2,vzero);
+            v11 = vec_madd(v7,vsqrt2,vzero);
+            v12 = vec_madd(v8,vsqrt2,vzero);
+            
+            vec_st(v9,0,wsamp_s[0][sblock]+j);
+            vec_st(v10,0,wsamp_s[1][sblock]+j);
+            vec_st(v11,16,wsamp_s[0][sblock]+j);
+            vec_st(v12,16,wsamp_s[1][sblock]+j);
+        }
+#else
+        FLOAT const sqrt2_half = SQRT2 * 0.5f;
         for (j = BLKSIZE_s - 1; j >= 0; --j) {
             FLOAT const l = wsamp_s[0][sblock][j];
             FLOAT const r = wsamp_s[1][sblock][j];
             wsamp_s[0][sblock][j] = (l + r) * sqrt2_half;
             wsamp_s[1][sblock][j] = (l - r) * sqrt2_half;
         }
+#endif
     }
 
     /*********************************************************************
     *  compute energies
     *********************************************************************/
+#if __ALTIVEC__
+    vprev = vec_ld(0,(*wsamp_s)[sblock]);
+    for(j = 0; j < BLKSIZE_s/2; j += 16) {
+        v1 = vec_ld(0,(*wsamp_s)[sblock]+j);
+        v2 = vec_ld(16,(*wsamp_s)[sblock]+j);
+        v3 = vec_ld(32,(*wsamp_s)[sblock]+j);
+        v4 = vec_ld(48,(*wsamp_s)[sblock]+j);
+        v5 = vec_ld(48,(*wsamp_s)[sblock]+240-j);
+        v6 = vec_ld(32,(*wsamp_s)[sblock]+240-j);
+        v7 = vec_ld(16,(*wsamp_s)[sblock]+240-j);
+        v8 = vec_ld(0,(*wsamp_s)[sblock]+240-j);
+        v9 = vec_perm(vprev,v5,vperm);
+        v10 = vec_perm(v5,v6,vperm);
+        v11 = vec_perm(v6,v7,vperm);
+        v12 = vec_perm(v7,v8,vperm);
+        vprev = v8;
+        v1 = vec_madd(v1,v1,vzero);
+        v2 = vec_madd(v2,v2,vzero);
+        v3 = vec_madd(v3,v3,vzero);
+        v4 = vec_madd(v4,v4,vzero);
+        v5 = vec_madd(v9,v9,v1);
+        v6 = vec_madd(v10,v10,v2);
+        v7 = vec_madd(v11,v11,v3);
+        v8 = vec_madd(v12,v12,v4);
+        v9 = vec_madd(v5,vhalf,vzero);
+        v10 = vec_madd(v6,vhalf,vzero);
+        v11 = vec_madd(v7,vhalf,vzero);
+        v12 = vec_madd(v8,vhalf,vzero);
+        
+        vec_st(v9,0,fftenergy_s[sblock]+j);
+        vec_st(v10,16,fftenergy_s[sblock]+j);
+        vec_st(v11,32,fftenergy_s[sblock]+j);
+        vec_st(v12,48,fftenergy_s[sblock]+j);
+    }
+    
+    v1 = vec_madd(vprev,vprev,vzero);
+    vec_ste(v1,0,fftenergy_s[sblock]+j);
+#else
     fftenergy_s[sblock][0] = (*wsamp_s)[sblock][0];
     fftenergy_s[sblock][0] *= fftenergy_s[sblock][0];
     for (j = BLKSIZE_s / 2 - 1; j >= 0; --j) {
@@ -744,6 +971,7 @@ vbrpsy_compute_fft_s(lame_internal_flags const *gfc, const sample_t * const buff
         FLOAT const im = (*wsamp_s)[sblock][BLKSIZE_s / 2 + j];
         fftenergy_s[sblock][BLKSIZE_s / 2 - j] = (re * re + im * im) * 0.5f;
     }
+#endif
 }
 
 
@@ -772,7 +1000,24 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
                         FLOAT energy[4], FLOAT sub_short_factor[4][3], int ns_attacks[4][4],
                         int uselongblock[2])
 {
-    FLOAT   ns_hpfsmpl[2][576];
+#if __ALTIVEC__
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
+    vector float vsum,vsum1,vsum2,vsuma,vsumb,vsumc,vsumd,vmaska,vmaskb,vmaskc,vmaskd;
+    vector unsigned char vmask1,vmask2,vmask3,vmask4,vmask1inv,vmask2inv,vmask3inv,vmask4inv,vperm,vs4,vs8,vs12;
+    
+    vperm = (vector unsigned char)VINIT16(12,13,14,15,8,9,10,11,4,5,6,7,0,1,2,3);
+    v1 = (vector float)vec_splat_u8(1);
+    v2 = (vector float)vec_splat_u8(5);
+    vs4 = vec_sl((vector unsigned char)v1,(vector unsigned char)v2);
+    vs8 = vec_sl(vs4,(vector unsigned char)v1);
+    vs12 = vec_or(vs4,vs8);
+    v3 = (vector float)vec_splat_s32(-1);
+    vmaska = vec_slo(v3,vs12);
+    vmaskb = vec_sro(vmaska,vs4);
+    vmaskc = vec_sro(vmaska,vs8);
+    vmaskd = vec_sro(vmaska,vs12);
+#endif
+    FLOAT   ns_hpfsmpl[2][576] __attribute__ ((aligned (16)));
     SessionConfig_t const *const cfg = &gfc->cfg;
     PsyStateVar_t *const psv = &gfc->sv_psy;
     plotting_data *plt = cfg->analysis ? gfc->pinfo : 0;
@@ -785,14 +1030,142 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
     /* Don't copy the input buffer into a temporary buffer */
     /* unroll the loop 2 times */
     for (chn = 0; chn < n_chn_out; chn++) {
-        static const FLOAT fircoef[] = {
+        static const FLOAT fircoef[] __attribute__ ((aligned (16))) = {
             -8.65163e-18 * 2, -0.00851586 * 2, -6.74764e-18 * 2, 0.0209036 * 2,
             -3.36639e-17 * 2, -0.0438162 * 2, -1.54175e-17 * 2, 0.0931738 * 2,
-            -5.52212e-17 * 2, -0.313819 * 2
+            -5.52212e-17 * 2, -0.313819 * 2, 0.0, 0.0
         };
         /* apply high pass filter of fs/4 */
         const sample_t *const firbuf = &buffer[chn][576 - 350 - NSFIRLEN + 192];
-        assert(dimension_of(fircoef) == ((NSFIRLEN - 1) / 2));
+        //assert(dimension_of(fircoef) == ((NSFIRLEN - 1) / 2));
+#if __ALTIVEC__
+        v1 = vec_ld(0, firbuf+10);
+        vmask1 = vec_lvsl(0, firbuf);
+        vmask2 = vec_lvsl(0, firbuf+1);
+        vmask3 = vec_lvsl(0, firbuf+2);
+        vmask4 = vec_lvsl(0, firbuf+3);
+        vmask1inv = vec_perm(vmask1,vmask1,vperm);
+        vmask2inv = vec_perm(vmask2,vmask2,vperm);
+        vmask3inv = vec_perm(vmask3,vmask3,vperm);
+        vmask4inv = vec_perm(vmask4,vmask4,vperm);
+        for(i=0;i<576;) {
+            v2 = vec_ld(16,firbuf+i+10);
+            vsum1 = vec_perm(v1, v2, vmask3);
+            v1 = v2;
+            
+            vsum2 = vec_splat(vsum1, 0);
+            vsum = vec_and(vsum2, vmaska);
+            v3 = vec_ld(0, firbuf+i);
+            v4 = vec_ld(16,firbuf+i+NSFIRLEN-3);
+            for(j=0;j<(NSFIRLEN-1)/2;j+=4) {
+                v5 = vec_ld(16, firbuf+i+j);
+                v6 = vec_ld(0, firbuf+i+NSFIRLEN-3-j);
+                v7 = vec_perm(v3,v5,vmask1);
+                v8 = vec_perm(v6,v4,vmask3inv);
+                v3 = v5;
+                v4 = v6;
+                v10 = vec_ld(0,fircoef+j);
+                v11 = vec_add(v7,v8);
+                vsum = vec_madd(v10,v11,vsum);
+            }
+            
+            v12 = vec_slo(vsum,vs4);
+            v13 = vec_slo(vsum,vs8);
+            v14 = vec_slo(vsum,vs12);
+            v15 = vec_add(vsum,v12);
+            v16 = vec_add(v13,v14);
+            vsuma = vec_add(v15,v16);
+            vsuma = vec_and(vsuma,vmaska);
+            
+            i++;
+            
+            vsum2 = vec_splat(vsum1, 1);
+            vsum = vec_and(vsum2, vmaska);
+            v3 = vec_ld(0, firbuf+i);
+            v4 = vec_ld(16,firbuf+i+NSFIRLEN-3);
+            vmask2 = vec_lvsl(0, firbuf+i);
+            for(j=0;j<(NSFIRLEN-1)/2;j+=4) {
+                v5 = vec_ld(16, firbuf+i+j);
+                v6 = vec_ld(0, firbuf+i+NSFIRLEN-3-j);
+                v7 = vec_perm(v3,v5,vmask2);
+                v8 = vec_perm(v6,v4,vmask4inv);
+                v3 = v5;
+                v4 = v6;
+                v10 = vec_ld(0,fircoef+j);
+                v11 = vec_add(v7,v8);
+                vsum = vec_madd(v10,v11,vsum);
+            }
+            
+            v12 = vec_sro(vsum,vs4);
+            v13 = vec_slo(vsum,vs4);
+            v14 = vec_slo(vsum,vs8);
+            v15 = vec_add(vsum,v12);
+            v16 = vec_add(v13,v14);
+            vsumb = vec_add(v15,v16);
+            vsumb = vec_and(vsumb,vmaskb);
+            
+            i++;
+            
+            vsum2 = vec_splat(vsum1, 2);
+            vsum = vec_and(vsum2, vmaska);
+            v3 = vec_ld(0, firbuf+i);
+            v4 = vec_ld(16,firbuf+i+NSFIRLEN-3);
+            vmask2 = vec_lvsl(0, firbuf+i);
+            for(j=0;j<(NSFIRLEN-1)/2;j+=4) {
+                v5 = vec_ld(16, firbuf+i+j);
+                v6 = vec_ld(0, firbuf+i+NSFIRLEN-3-j);
+                v7 = vec_perm(v3,v5,vmask3);
+                v8 = vec_perm(v6,v4,vmask1inv);
+                v3 = v5;
+                v4 = v6;
+                v10 = vec_ld(0,fircoef+j);
+                v11 = vec_add(v7,v8);
+                vsum = vec_madd(v10,v11,vsum);
+            }
+            
+            v12 = vec_sro(vsum,vs4);
+            v13 = vec_sro(vsum,vs8);
+            v14 = vec_slo(vsum,vs4);
+            v15 = vec_add(vsum,v12);
+            v16 = vec_add(v13,v14);
+            vsumc = vec_add(v15,v16);
+            vsumc = vec_and(vsumc,vmaskc);
+            
+            i++;
+            
+            vsum2 = vec_splat(vsum1, 3);
+            vsum = vec_and(vsum2, vmaska);
+            v3 = vec_ld(0, firbuf+i);
+            v4 = vec_ld(16,firbuf+i+NSFIRLEN-3);
+            vmask2 = vec_lvsl(0, firbuf+i);
+            for(j=0;j<(NSFIRLEN-1)/2;j+=4) {
+                v5 = vec_ld(16, firbuf+i+j);
+                v6 = vec_ld(0, firbuf+i+NSFIRLEN-3-j);
+                v7 = vec_perm(v3,v5,vmask4);
+                v8 = vec_perm(v6,v4,vmask2inv);
+                v3 = v5;
+                v4 = v6;
+                v10 = vec_ld(0,fircoef+j);
+                v11 = vec_add(v7,v8);
+                vsum = vec_madd(v10,v11,vsum);
+            }
+            
+            v12 = vec_sro(vsum,vs4);
+            v13 = vec_sro(vsum,vs8);
+            v14 = vec_sro(vsum,vs12);
+            v15 = vec_add(vsum,v12);
+            v16 = vec_add(v13,v14);
+            vsumd = vec_add(v15,v16);
+            vsumd = vec_and(vsumd,vmaskd);
+            
+            vsum1 = vec_or(vsuma,vsumb);
+            vsum2 = vec_or(vsumc,vsumd);
+            vsum = vec_or(vsum1,vsum2);
+            
+            i++;
+            vec_st(vsum,0,ns_hpfsmpl[chn]+i-4);
+        }
+#else
         for (i = 0; i < 576; i++) {
             FLOAT   sum1, sum2;
             sum1 = firbuf[i + 10];
@@ -803,6 +1176,7 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
             }
             ns_hpfsmpl[chn][i] = sum1 + sum2;
         }
+#endif
         masking_ratio[gr_out][chn].en = psv->en[chn];
         masking_ratio[gr_out][chn].thm = psv->thm[chn];
         if (n_chn_psy > 2) {
@@ -841,9 +1215,28 @@ vbrpsy_attack_detection(lame_internal_flags * gfc, const sample_t * const buffer
         for (i = 0; i < 9; i++) {
             FLOAT const *const pfe = pf + 576 / 9;
             FLOAT   p = 1.;
+#if __ALTIVEC__
+            FLOAT vmax[4] __attribute__ ((aligned (16)));
+            v1 = (vector float)vec_splat_s32(1);
+            v2 = vec_ctf((vector signed int)v1,0);
+            for (; pf < pfe; pf+=4) {
+                v3 = vec_ld(0,pf);
+                v4 = vec_abs(v3);
+                v2 = vec_max(v2,v4);
+            }
+            v5 = vec_slo(v2,vs4);
+            v6 = vec_slo(v2,vs8);
+            v7 = vec_slo(v2,vs12);
+            v8 = vec_max(v2,v5);
+            v9 = vec_max(v6,v7);
+            v10 =vec_max(v8,v9);
+            vec_st(v10,0,vmax);
+            p = vmax[0];
+#else
             for (; pf < pfe; pf++)
                 if (p < fabs(*pf))
                     p = fabs(*pf);
+#endif
             psv->last_en_subshort[chn][i] = en_subshort[i + 3] = p;
             en_short[1 + i / 3] += p;
             if (p > en_subshort[i + 3 - 2]) {
@@ -1039,7 +1432,7 @@ vbrpsy_calc_mask_index_s(lame_internal_flags const *gfc, FLOAT const *max,
 
 
 static void
-vbrpsy_compute_masking_s(lame_internal_flags * gfc, const FLOAT(*fftenergy_s)[HBLKSIZE_s],
+vbrpsy_compute_masking_s(lame_internal_flags * gfc, const FLOAT(*fftenergy_s)[HBLKSIZE_s+3],
                          FLOAT * eb, FLOAT * thr, int chn, int sblock)
 {
     PsyStateVar_t *const psv = &gfc->sv_psy;
@@ -1147,24 +1540,286 @@ vbrpsy_compute_masking_l(lame_internal_flags * gfc, const FLOAT fftenergy[HBLKSI
 {
     PsyStateVar_t *const psv = &gfc->sv_psy;
     PsyConst_CB2SB_t const *const gdl = &gfc->cd_psy->l;
-    FLOAT   max[CBANDS], avg[CBANDS];
-    unsigned char mask_idx_l[CBANDS + 2];
+    FLOAT   max[CBANDS] __attribute__ ((aligned (16))), avg[CBANDS];
+    unsigned char mask_idx_l[CBANDS + 2] __attribute__ ((aligned (16)));
     int     k, b;
+#if __ALTIVEC__
+    float tmp[4] __attribute__ ((aligned (16)));
+    const vector unsigned char v31 = (vector unsigned char)VINIT16ALL(31);
+    const vector unsigned int vmask1 = (vector unsigned int)VINIT4ALL(0xff);
+    const vector signed int vone = (vector signed int)VINIT4ALL(1);
+    const vector unsigned int vtab1 = (vector unsigned int)VINIT4(0x3f800000,0x3f4b5936,0x3f218698,0x3f218698);
+    const vector unsigned int vtab2 = (vector unsigned int)VINIT4(0x3f218698,0x3f218698,0x3f218698,0x3e809bfa);
+    const vector unsigned int vtab3 = (vector unsigned int)VINIT4(0x3df09e99,0,0,0);
+    const vector unsigned int vtable1 = (vector unsigned int)VINIT4(0x3fe39e89,0x3fec53e5,0x3ff55ea7,0x3ff9149b);
+    const vector unsigned int vtable2 = (vector unsigned int)VINIT4(0x3ffcd90e,0x3fea8f7b,0x3fd997da,0x3fbf84e2);
+    const vector unsigned int vtable3 = (vector unsigned int)VINIT4(0x3fa8917c,0x3f800000,0,0);
+    const vector float vzero = vec_xor(vzero,vzero);
+#endif
 
  /*********************************************************************
     *    Calculate the energy and the tonality of each partition.
  *********************************************************************/
     calc_energy(gdl, fftenergy, eb_l, max, avg);
     calc_mask_index_l(gfc, max, avg, mask_idx_l);
+#if __ALTIVEC__
+    const vector unsigned char vmaskidx1 = vec_ld(0,mask_idx_l); //needs to be aligned
+    const vector unsigned char vmaskidx2 = vec_ld(16,mask_idx_l);
+    const vector unsigned char vmaskidx3 = vec_ld(32,mask_idx_l);
+    const vector unsigned char vmaskidx4 = vec_ld(48,mask_idx_l);
+    tmp[0] = gfc->sv_qnt.masking_lower;
+    vector float vmasking_lower_coeff = vec_ld(0,tmp);
+    vmasking_lower_coeff = vec_splat(vmasking_lower_coeff,0);
+#endif
 
  /*********************************************************************
     *      convolve the partitioned energy and unpredictability
     *      with the spreading function, s3_l[b][k]
  ********************************************************************/
     k = 0;
-    for (b = 0; b < gdl->npart; b++) {
+#if __ALTIVEC__
+    for (b = 0; b < gdl->npart-3; b+=4) {
+        vector signed int v1,v2,v3,v4,v5,vkk,vkk2,vlast,vdd,vdd_n,vk,vk2;
+        vector float vf1,vf2,vf3,vf4,vecb,vx,veb,vavgmask,vmasking_lower;
+        vmasking_lower = vec_ld(0,gdl->masking_lower+b);
+        vmasking_lower = vec_madd(vmasking_lower,vmasking_lower_coeff,vzero);
+        int tmp2[4] __attribute__ ((aligned (16)));
+        int tmp3[4] __attribute__ ((aligned (16)));
+        
+        v1 = vec_ld(0,gdl->s3ind[b]); //needs to be aligned
+        v2 = vec_ld(0,gdl->s3ind[b+1]);
+        v3 = vec_ld(0,gdl->s3ind[b+2]);
+        v4 = vec_ld(0,gdl->s3ind[b+3]);
+        v1 = vec_mergeh(v1,v3);
+        v2 = vec_mergeh(v2,v4);
+        vkk = vec_mergeh(v1,v2);
+        vlast = vec_mergel(v1,v2);
+        
+        v1 = vec_sub(vlast,vkk);
+        v1 = vec_sel(v1,(vector signed int)vzero,vec_cmpgt((vector signed int)vzero,v1));
+        vec_st(v1,0,tmp2);
+        
+        tmp3[0] = k;
+        tmp3[1] = k+tmp2[0]+1;
+        tmp3[2] = k+tmp2[0]+tmp2[1]+2;
+        tmp3[3] = k+tmp2[0]+tmp2[1]+tmp2[2]+3;
+        k = k+tmp2[0]+tmp2[1]+tmp2[2]+tmp2[3]+4;
+        vk = vec_ld(0,tmp3);
+        
+        v1 = (vector signed int)vec_perm(vmaskidx1,vmaskidx2,(vector unsigned char)vkk);
+        v2 = (vector signed int)vec_perm(vmaskidx3,vmaskidx4,(vector unsigned char)vkk);
+        vdd = vec_sel(v1,v2,vec_cmpgt(vkk,(vector signed int)VINIT4ALL(31)));
+        vdd = vec_and(vdd,(vector signed int)vmask1);
+        vdd_n = vone;
+        
+        tmp[0] = gdl->s3[tmp3[0]];
+        tmp[1] = gdl->s3[tmp3[1]];
+        tmp[2] = gdl->s3[tmp3[2]];
+        tmp[3] = gdl->s3[tmp3[3]];
+        vf1 = vec_ld(0,tmp);
+        
+        vec_st(vkk,0,tmp2);
+        tmp[0] = eb_l[tmp2[0]];
+        tmp[1] = eb_l[tmp2[1]];
+        tmp[2] = eb_l[tmp2[2]];
+        tmp[3] = eb_l[tmp2[3]];
+        veb = vec_ld(0,tmp);
+        
+        vecb = vec_madd(vf1,veb,vzero);
+        
+        v1 = vec_sl(vdd,vec_splat_u32(2));
+        v2 = vec_add(v1,vec_splat_s32(1));
+        v3 = vec_add(v1,vec_splat_s32(2));
+        v4 = vec_add(v2,vec_splat_s32(2));
+        v1 = vec_sl(v1,vec_splat_u32(-8));
+        v2 = vec_sl(v2,vec_splat_u32(-16));
+        v3 = vec_sl(v3,vec_splat_u32(8));
+        v1 = vec_or(v1,v2);
+        v3 = vec_or(v3,v4);
+        v1 = vec_or(v1,v3);
+        
+        vf1 = (vector float)vec_perm(vtab1,vtab2,(vector unsigned char)v1);
+        vf2 = (vector float)vec_perm(vtab3,vtab2,(vector unsigned char)v1);
+        vf2 = vec_sel(vf1,vf2,(vector unsigned int)vec_cmpgt((vector unsigned char)v1,v31));
+        vecb = vec_madd(vecb,vf2,vzero);
+        
+        vkk = vec_add(vkk,vone);
+        vk = vec_add(vk,vone);
+        while(vec_any_le(vkk,vlast)) {
+            vkk2 = vec_sel(vkk,vlast,vec_cmpgt(vkk,vlast));
+            vk2 = vec_sel(vk,(vector signed int)vzero,vec_cmpgt(vkk,vlast));
+            v1 = (vector signed int)vec_perm(vmaskidx1,vmaskidx2,(vector unsigned char)vkk2);
+            v2 = (vector signed int)vec_perm(vmaskidx3,vmaskidx4,(vector unsigned char)vkk2);
+            v1 = vec_sel(v1,v2,vec_cmpgt(vkk2,(vector signed int)VINIT4ALL(31)));
+            v1 = vec_and(v1,(vector signed int)vmask1);
+            v2 = (vector signed int)vec_cmpgt(vkk,vlast);
+            v2 = vec_nor(v2,v2);
+            v5 = vec_and(v1,v2);
+            v2 = vec_and(vone,v2);
+            vdd = vec_add(vdd,v5);
+            vdd_n = vec_add(vdd_n,v2);
+            
+            vec_st(vk2,0,tmp2);
+            tmp[0] = gdl->s3[tmp2[0]];
+            tmp[1] = gdl->s3[tmp2[1]];
+            tmp[2] = gdl->s3[tmp2[2]];
+            tmp[3] = gdl->s3[tmp2[3]];
+            vf1 = vec_ld(0,tmp);
+            
+            vec_st(vkk,0,tmp2);
+            tmp[0] = eb_l[tmp2[0]];
+            tmp[1] = eb_l[tmp2[1]];
+            tmp[2] = eb_l[tmp2[2]];
+            tmp[3] = eb_l[tmp2[3]];
+            veb = vec_ld(0,tmp);
+            
+            vx = vec_madd(vf1,veb,vzero);
+            
+            v1 = vec_sl(v5,vec_splat_u32(2));
+            v2 = vec_add(v1,vec_splat_s32(1));
+            v3 = vec_add(v1,vec_splat_s32(2));
+            v4 = vec_add(v2,vec_splat_s32(2));
+            v1 = vec_sl(v1,vec_splat_u32(-8));
+            v2 = vec_sl(v2,vec_splat_u32(-16));
+            v3 = vec_sl(v3,vec_splat_u32(8));
+            v1 = vec_or(v1,v2);
+            v3 = vec_or(v3,v4);
+            v1 = vec_or(v1,v3);
+            
+            vf1 = (vector float)vec_perm(vtab1,vtab2,(vector unsigned char)v1);
+            vf2 = (vector float)vec_perm(vtab3,vtab2,(vector unsigned char)v1);
+            vf2 = vec_sel(vf1,vf2,(vector unsigned int)vec_cmpgt((vector unsigned char)v1,v31));
+            vx = vec_madd(vx,vf2,vzero);
+            {
+                vector float vratio,vout,vf5;
+                vf1 = vec_sel(vecb,vzero,vec_cmplt(vecb,vzero));
+                vf2 = vec_sel(vx,vzero,vec_cmplt(vx,vzero));
+                vf3 = vec_sel(vf1,vf2,vec_cmpgt(vf2,vf1));
+                vf4 = vec_sel(vf2,vf1,vec_cmpgt(vf2,vf1));
+                vf5 = vec_re(vf4);
+                vratio = vec_madd(vf3,vec_madd(vec_nmsub(vf4,vf5,(vector float)VINIT4ALL(1.0)),vf5,vf5),vzero);
+                
+                tmp2[0] = b;
+                tmp2[1] = b+1;
+                tmp2[2] = b+2;
+                tmp2[3] = b+3;
+                tmp3[0] = mask_add_delta(mask_idx_l[b]);
+                tmp3[1] = mask_add_delta(mask_idx_l[b+1]);
+                tmp3[2] = mask_add_delta(mask_idx_l[b+2]);
+                tmp3[3] = mask_add_delta(mask_idx_l[b+3]);
+                v1 = vec_ld(0,tmp2);
+                v1 = vec_sub(vkk2,v1);
+                v2 = vec_ld(0,tmp3);
+                v1 = vec_abs(v1);
+                v5 = (vector signed int)vec_cmpgt(v1,v2);
+                v3 = (vector signed int)vec_cmpge(vratio,vmamax1);
+                
+                vf4 = vec_add(vf1,vf2);
+                if(vec_any_eq(vec_or(v5,v3),(vector signed int)vzero)) {
+                    vf3 = fast_log10_altivec_2(vratio);
+                    v1 = vec_cts(vf3,4);
+                    v1 = vec_sl(v1,vec_splat_u32(2));
+                    v2 = vec_add(v1,vec_splat_s32(1));
+                    v3 = vec_add(v1,vec_splat_s32(2));
+                    v4 = vec_add(v2,vec_splat_s32(2));
+                    v1 = vec_sl(v1,vec_splat_u32(-8));
+                    v2 = vec_sl(v2,vec_splat_u32(-16));
+                    v3 = vec_sl(v3,vec_splat_u32(8));
+                    v1 = vec_or(v1,v2);
+                    v3 = vec_or(v3,v4);
+                    v1 = vec_or(v1,v3);
+                    vf3 = (vector float)vec_perm(vtable1,vtable2,(vector unsigned char)v1);
+                    vf5 = (vector float)vec_perm(vtable3,vtable2,(vector unsigned char)v1);
+                    vf5 = vec_sel(vf3,vf5,(vector unsigned int)vec_cmpgt((vector unsigned char)v1,v31));
+                    vf5 = vec_madd(vf4,vf5,vzero);
+                    vf5 = vec_sel(vf5,vf4,vec_cmpge(vratio,vmamax1));
+                }
+                else vf5 = vf4;
+                
+                vout = vec_sel(vf1,vf2,vec_cmpgt(vf2,vf1));
+                vout = vec_sel(vout,vf4,vec_cmpgt(vmamax2,vratio));
+                vout = vec_sel(vf5,vout,(vector unsigned int)v5);
+                vout = vec_sel(vout,vecb,(vector unsigned int)vec_cmple(vx,vzero));
+                vout = vec_sel(vout,vx,(vector unsigned int)vec_cmple(vecb,vzero));
+                vecb = vec_sel(vout,vecb,vec_cmpgt(vkk,vlast));
+            }
+            vkk = vec_add(vkk,vone);
+            vk = vec_add(vk,vone);
+        }
+        vdd = vec_sl(vdd,(vector unsigned int)vone);
+        vdd_n = vec_sl(vdd_n,(vector unsigned int)vone);
+        vdd = vec_add(vdd,vone);
+        vf1 = vec_ctf(vdd,0);
+        vf2 = vec_ctf(vdd_n,0);
+        vf2 = vec_re(vf2);
+        vf1 = vec_madd(vf1,vf2,vzero);
+        vdd = vec_cts(vf1,0);
+        
+        v1 = vec_sl(vdd,vec_splat_u32(2));
+        v2 = vec_add(v1,vec_splat_s32(1));
+        v3 = vec_add(v1,vec_splat_s32(2));
+        v4 = vec_add(v2,vec_splat_s32(2));
+        v1 = vec_sl(v1,vec_splat_u32(-8));
+        v2 = vec_sl(v2,vec_splat_u32(-16));
+        v3 = vec_sl(v3,vec_splat_u32(8));
+        v1 = vec_or(v1,v2);
+        v3 = vec_or(v3,v4);
+        v1 = vec_or(v1,v3);
+        
+        vf1 = (vector float)vec_perm(vtab1,vtab2,(vector unsigned char)v1);
+        vf2 = (vector float)vec_perm(vtab3,vtab2,(vector unsigned char)v1);
+        vf1 = vec_sel(vf1,vf2,(vector unsigned int)vec_cmpgt((vector unsigned char)v1,v31));
+        vf2 = vec_ctf(vone,1);
+        vavgmask = vec_madd(vf1,vf2,vzero);
+        vecb = vec_madd(vecb,vavgmask,vzero);
+        
+        vf4 = vec_ld(0,eb_l+b); //needs to be aligned
+        if (psv->blocktype_old[chn & 0x01] == SHORT_TYPE) {
+            vf1 = vec_ld(0,psv->nb_l1[chn]+b); //needs to be aligned
+            vf3 = vec_madd(vf1,(vector float)VINIT4ALL(rpelev),vzero);
+            vf2 = vec_madd(vf4,(vector float)VINIT4ALL(NS_PREECHO_ATT2),vzero);
+            vf3 = vec_sel(vf2,vf3,vec_cmpgt(vf3,vzero));
+            vf3 = vec_min(vecb,vf3);
+            //vec_st(vf3,0,thr+b); //needs to be aligned
+        }
+        else {
+            vf1 = vec_ld(0,psv->nb_l1[chn]+b); //needs to be aligned
+            vf2 = vec_ld(0,psv->nb_l2[chn]+b); //needs to be aligned
+            vf3 = vec_madd(vf1,(vector float)VINIT4ALL(rpelev),vzero);
+            vf2 = vec_madd(vf2,(vector float)VINIT4ALL(rpelev2),vzero);
+            vf3 = vec_sel(vzero,vf3,vec_cmpgt(vf3,vzero));
+            vf2 = vec_sel(vzero,vf2,vec_cmpgt(vf2,vzero));
+            if (psv->blocktype_old[chn & 0x01] == NORM_TYPE) {
+                vf3 = vec_min(vf3,vf2);
+            }
+            vf3 = vec_min(vecb,vf3);
+            //vec_st(vf3,0,thr+b); //needs to be aligned
+        }
+        vec_st(vf1,0,psv->nb_l2[chn]+b); //needs to be aligned
+        vec_st(vecb,0,psv->nb_l1[chn]+b); //needs to be aligned
+        {
+            vx = vec_ld(0,max+b); //needs to be aligned
+            vf1 = vec_ld(0,gdl->minval+b);
+            vx = vec_madd(vx,vf1,vzero);
+            vx = vec_madd(vx,vavgmask,vzero);
+            vf3 = vec_sel(vf3,vx,vec_cmpgt(vf3,vx));
+            //vec_st(vf3,0,thr+b); //needs to be aligned
+        }
+		v1 = (vector signed int)vec_cmpgt(vmasking_lower,(vector float)VINIT4ALL(1.0f));
+		vf1 = vec_madd(vf3,vmasking_lower,vzero);
+		vf3 = vec_sel(vf3,vf1,(vector unsigned int)v1);
+        vf3 = vec_sel(vf3,vf4,vec_cmpgt(vf3,vf4));
+		vf1 = vec_madd(vf3,vmasking_lower,vzero);
+		vf3 = vec_sel(vf1,vf3,(vector unsigned int)v1);
+        vec_st(vf3,0,thr+b); //needs to be aligned
+    }
+#else
+    b=0;
+#endif
+    for (; b < gdl->npart; b++) {
         FLOAT   x, ecb, avg_mask, t;
         FLOAT const masking_lower = gdl->masking_lower[b] * gfc->sv_qnt.masking_lower;
+		//fprintf(stderr,"%f\n",masking_lower);
         /* convolve the partitioned energy with the spreading function */
         int     kk = gdl->s3ind[b][0];
         int const last = gdl->s3ind[b][1];
@@ -1423,11 +2078,11 @@ L3psycho_anal_vbr(lame_internal_flags * gfc,
     /* fft and energy calculation   */
     FLOAT(*wsamp_l)[BLKSIZE];
     FLOAT(*wsamp_s)[3][BLKSIZE_s];
-    FLOAT   fftenergy[HBLKSIZE];
-    FLOAT   fftenergy_s[3][HBLKSIZE_s];
-    FLOAT   wsamp_L[2][BLKSIZE];
-    FLOAT   wsamp_S[2][3][BLKSIZE_s];
-    FLOAT   eb[4][CBANDS], thr[4][CBANDS];
+    FLOAT   fftenergy[HBLKSIZE] __attribute__ ((aligned (16)));
+    FLOAT   fftenergy_s[3][HBLKSIZE_s+3] __attribute__ ((aligned (16)));
+    FLOAT   wsamp_L[2][BLKSIZE] __attribute__ ((aligned (16)));
+    FLOAT   wsamp_S[2][3][BLKSIZE_s] __attribute__ ((aligned (16)));
+    FLOAT   eb[4][CBANDS] __attribute__ ((aligned (16))), thr[4][CBANDS] __attribute__ ((aligned (16)));
 
     FLOAT   sub_short_factor[4][3];
     FLOAT   thmm;
@@ -1436,7 +2091,7 @@ L3psycho_anal_vbr(lame_internal_flags * gfc,
         (cfg->msfix > 0.f) ? (cfg->ATH_offset_factor * gfc->ATH->adjust_factor) : 1.f;
 
     const   FLOAT(*const_eb)[CBANDS] = (const FLOAT(*)[CBANDS]) eb;
-    const   FLOAT(*const_fftenergy_s)[HBLKSIZE_s] = (const FLOAT(*)[HBLKSIZE_s]) fftenergy_s;
+    const   FLOAT(*const_fftenergy_s)[HBLKSIZE_s+3] = (const FLOAT(*)[HBLKSIZE_s+3]) fftenergy_s;
 
     /* block type  */
     int     ns_attacks[4][4] = { {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0} };
@@ -1824,7 +2479,7 @@ compute_bark_values(PsyConst_CB2SB_t const *gd, FLOAT sfreq, int fft_size,
 }
 
 static int
-init_s3_values(FLOAT ** p, int (*s3ind)[2], int npart,
+init_s3_values(FLOAT ** p, int (*s3ind)[4], int npart,
                FLOAT const *bval, FLOAT const *bval_width, FLOAT const *norm)
 {
     FLOAT   s3[CBANDS][CBANDS];

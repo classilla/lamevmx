@@ -28,6 +28,10 @@
 # include <config.h>
 #endif
 
+#if __ALTIVEC__
+#include <altivec.h>
+#endif
+
 #include "lame.h"
 #include "machine.h"
 #include "encoder.h"
@@ -42,7 +46,26 @@
 #endif
 
 
+#if (1) // all Power Macs running OS X support frsqrte
+static inline double __frsqrte(double number)
+{
+    double y;
+    asm("frsqrte %0,%1" : "=f" (y) : "f" (number));
+    return y;
+}
 
+static inline double ppc_sqrt(double x) { // G5 has fsqrt. let's use that
+    double y;
+    const double halfx = 0.5 * x;
+    y = __frsqrte(x);
+    y *= 1.5 - halfx * y * y;
+    y *= 1.5 - halfx * y * y;
+    y *= 1.5 - halfx * y * y;
+    //y *= 1.5 - halfx * y * y;
+    y *= x;
+    return (x == 0.0) ? 0 : y;
+}
+#endif
 
 /* convert from L/R <-> Mid/Side */
 static void
@@ -72,9 +95,162 @@ ms_convert(III_side_info_t * l3_side, int gr)
 static void
 init_xrpow_core_c(gr_info * const cod_info, FLOAT xrpow[576], int upper, FLOAT * sum)
 {
+#if __ALTIVEC__
+    vector float v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16,v17,v18,v19,v20;
+    vector float vsum,vsum2,vsum3,vsum4,vmax,vmax2,vmax3,vmax4,vzero;
+    vector unsigned char vc1,vc2,vc3,vc4,vc5,vperm;
+    vector float vconst1 = (vector float)VINIT4ALL(0.25);
+    vector float vconst2 = (vector float)VINIT4ALL(1.25);
+#endif
     int     i;
     FLOAT   tmp;
     *sum = 0;
+#if __ALTIVEC__
+    vc1 = vec_splat_u8(1);
+    vc2 = vec_splat_u8(5);
+    vc3 = vec_sl(vc1,vc2);
+    vc4 = vec_sl(vc3,vc1);
+    vc5 = vec_or(vc3,vc4);
+    vsum = vec_xor(vsum,vsum);
+    vzero = vec_xor(vzero,vzero);
+    vmax = vec_xor(vmax,vmax);
+    vsum2 = vec_xor(vsum2,vsum2);
+    vmax2 = vec_xor(vmax2,vmax2);
+    vsum3 = vec_xor(vsum3,vsum3);
+    vmax3 = vec_xor(vmax3,vmax3);
+    vsum4 = vec_xor(vsum4,vsum4);
+    vmax4 = vec_xor(vmax4,vmax4);
+    
+    v0 = vec_ld(0,(cod_info->xr));
+    vperm = vec_lvsl(0,(cod_info->xr));
+    for (i = 0; i <= upper-15; i+=16) {
+        v1 = vec_ld(16,(cod_info->xr)+i);
+        v2 = vec_ld(32,(cod_info->xr)+i);
+        v3 = vec_ld(48,(cod_info->xr)+i);
+        v4 = vec_ld(64,(cod_info->xr)+i);
+        v5 = vec_perm(v0,v1,vperm);
+        v6 = vec_perm(v1,v2,vperm);
+        v7 = vec_perm(v2,v3,vperm);
+        v8 = vec_perm(v3,v4,vperm);
+        v0 = v4;
+        v9 = vec_abs(v5);
+        v10 = vec_abs(v6);
+        v11 = vec_abs(v7);
+        v12 = vec_abs(v8);
+        vsum = vec_add(vsum,v9);
+        vsum2 = vec_add(vsum2,v10);
+        vsum3 = vec_add(vsum3,v11);
+        vsum4 = vec_add(vsum4,v12);
+        v1 = vec_re(vec_rsqrte(vec_rsqrte(v9)));
+        v2 = vec_re(vec_rsqrte(vec_rsqrte(v10)));
+        v3 = vec_re(vec_rsqrte(vec_rsqrte(v11)));
+        v4 = vec_re(vec_rsqrte(vec_rsqrte(v12)));
+        v5 = (vector float)vec_cmpeq(vzero,v9);
+        v6 = (vector float)vec_cmpeq(vzero,v10);
+        v7 = (vector float)vec_cmpeq(vzero,v11);
+        v8 = (vector float)vec_cmpeq(vzero,v12);
+        v13 = vec_madd(v1,v1,vzero);
+        v14 = vec_madd(v2,v2,vzero);
+        v15 = vec_madd(v3,v3,vzero);
+        v16 = vec_madd(v4,v4,vzero);
+        v13 = vec_madd(v13,v13,vzero);
+        v14 = vec_madd(v14,v14,vzero);
+        v15 = vec_madd(v15,v15,vzero);
+        v16 = vec_madd(v16,v16,vzero);
+        v17 = vec_madd(v9,vconst1,vzero);
+        v18 = vec_madd(v10,vconst1,vzero);
+        v19 = vec_madd(v11,vconst1,vzero);
+        v20 = vec_madd(v12,vconst1,vzero);
+        v13 = vec_nmsub(v13,v17,vconst2);
+        v14 = vec_nmsub(v14,v18,vconst2);
+        v15 = vec_nmsub(v15,v19,vconst2);
+        v16 = vec_nmsub(v16,v20,vconst2);
+        v1 = vec_madd(v13,v1,vzero);
+        v2 = vec_madd(v14,v2,vzero);
+        v3 = vec_madd(v15,v3,vzero);
+        v4 = vec_madd(v16,v4,vzero);
+        v1 = vec_sel(v1,vzero,(vector unsigned int)v5);
+        v2 = vec_sel(v2,vzero,(vector unsigned int)v6);
+        v3 = vec_sel(v3,vzero,(vector unsigned int)v7);
+        v4 = vec_sel(v4,vzero,(vector unsigned int)v8);
+        v17 = vec_madd(v1,v9,vzero);
+        v18 = vec_madd(v2,v10,vzero);
+        v19 = vec_madd(v3,v11,vzero);
+        v20 = vec_madd(v4,v12,vzero);
+        vec_st(v17,0,xrpow+i);
+        vec_st(v18,16,xrpow+i);
+        vec_st(v19,32,xrpow+i);
+        vec_st(v20,48,xrpow+i);
+        vmax = vec_max(v17,vmax);
+        vmax2 = vec_max(v18,vmax2);
+        vmax3 = vec_max(v19,vmax3);
+        vmax4 = vec_max(v20,vmax4);
+    }
+    vmax = vec_max(vmax,vmax2);
+    vmax3 = vec_max(vmax3,vmax4);
+    vmax = vec_max(vmax,vmax3);
+    vsum = vec_add(vsum,vsum2);
+    vsum3 = vec_add(vsum3,vsum4);
+    vsum = vec_add(vsum,vsum3);
+    v1 = vec_slo(vmax,vc3);
+    v2 = vec_slo(vsum,vc3);
+    v3 = vec_max(v1,vmax);
+    v4 = vec_add(v2,vsum);
+    v5 = vec_slo(v3,vc4);
+    v6 = vec_slo(v4,vc4);
+    vmax = vec_max(v3,v5);
+    vsum = vec_add(v4,v6);
+    vmax = vec_perm(vmax,vmax,vec_lvsr(0,&(cod_info->xrpow_max)));
+    vsum = vec_perm(vsum,vsum,vec_lvsr(0,sum));
+    vec_ste(vmax,0,&(cod_info->xrpow_max));
+    vec_ste(vsum,0,sum);
+    
+    for (; i <= upper; i++) {
+        tmp = fabs(cod_info->xr[i]);
+        *sum += tmp;
+        xrpow[i] = sqrt(tmp * sqrt(tmp));
+        
+        if (xrpow[i] > cod_info->xrpow_max)
+        cod_info->xrpow_max = xrpow[i];
+    }
+#else
+#if(1) // will work on G3
+    FLOAT   tmp2,tmp3,tmp4;
+    
+    for (i = 0; i <= upper-3; i+=4) {
+        tmp = fabs (cod_info->xr[i]);
+        tmp2 = fabs (cod_info->xr[i+1]);
+        tmp3 = fabs (cod_info->xr[i+2]);
+        tmp4 = fabs (cod_info->xr[i+3]);
+        *sum += tmp;
+        *sum += tmp2;
+        *sum += tmp3;
+        *sum += tmp4;
+        
+        xrpow[i] = ppc_sqrt (tmp * ppc_sqrt(tmp));
+        xrpow[i+1] = ppc_sqrt (tmp2 * ppc_sqrt(tmp2));
+        xrpow[i+2] = ppc_sqrt (tmp3 * ppc_sqrt(tmp3));
+        xrpow[i+3] = ppc_sqrt (tmp4 * ppc_sqrt(tmp4));
+        
+        if (xrpow[i] > cod_info->xrpow_max)
+        cod_info->xrpow_max = xrpow[i];
+        if (xrpow[i+1] > cod_info->xrpow_max)
+        cod_info->xrpow_max = xrpow[i+1];
+        if (xrpow[i+2] > cod_info->xrpow_max)
+        cod_info->xrpow_max = xrpow[i+2];
+        if (xrpow[i+3] > cod_info->xrpow_max)
+        cod_info->xrpow_max = xrpow[i+3];
+    }
+    
+    for (; i <= upper; i++) {
+        tmp = fabs(cod_info->xr[i]);
+        *sum += tmp;
+        xrpow[i] = ppc_sqrt(tmp * ppc_sqrt(tmp));
+
+        if (xrpow[i] > cod_info->xrpow_max)
+            cod_info->xrpow_max = xrpow[i];
+    }
+#else
     for (i = 0; i <= upper; ++i) {
         tmp = fabs(cod_info->xr[i]);
         *sum += tmp;
@@ -83,6 +259,8 @@ init_xrpow_core_c(gr_info * const cod_info, FLOAT xrpow[576], int upper, FLOAT *
         if (xrpow[i] > cod_info->xrpow_max)
             cod_info->xrpow_max = xrpow[i];
     }
+#endif
+#endif
 }
 
 
@@ -1495,7 +1673,7 @@ VBR_old_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
     EncResult_t *const eov = &gfc->ov_enc;
     FLOAT   l3_xmin[2][2][SFBMAX];
 
-    FLOAT   xrpow[576];
+    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
     int     bands[2][2];
     int     frameBits[15];
     int     used_bits;
@@ -1650,7 +1828,7 @@ VBR_new_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
     EncResult_t *const eov = &gfc->ov_enc;
     FLOAT   l3_xmin[2][2][SFBMAX];
 
-    FLOAT   xrpow[2][2][576];
+    FLOAT   xrpow[2][2][576] __attribute__ ((aligned (16)));
     int     frameBits[15];
     int     used_bits;
     int     max_bits[2][2];
@@ -1904,7 +2082,7 @@ ABR_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
     SessionConfig_t const *const cfg = &gfc->cfg;
     EncResult_t *const eov = &gfc->ov_enc;
     FLOAT   l3_xmin[SFBMAX];
-    FLOAT   xrpow[576];
+    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
     int     targ_bits[2][2];
     int     mean_bits, max_frame_bits;
     int     ch, gr, ath_over;
@@ -1991,7 +2169,7 @@ CBR_iteration_loop(lame_internal_flags * gfc, const FLOAT pe[2][2],
 {
     SessionConfig_t const *const cfg = &gfc->cfg;
     FLOAT   l3_xmin[SFBMAX];
-    FLOAT   xrpow[576];
+    FLOAT   xrpow[576] __attribute__ ((aligned (16)));
     int     targ_bits[2];
     int     mean_bits, max_bits;
     int     gr, ch;

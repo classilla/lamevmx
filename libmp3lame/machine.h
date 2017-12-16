@@ -184,6 +184,24 @@ typedef FLOAT sample_t;
 #  endif
 #endif
 
+#if __ALTIVEC__
+#ifdef __APPLE_CC__
+#define VINIT4(a,b,c,d)                          (a,b,c,d)
+#define VINIT8(a,b,c,d,e,f,g,h)                  (a,b,c,d,e,f,g,h)
+#define VINIT16(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p) (a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p)
+#define VINIT4ALL(a)                             (a,a,a,a)
+#define VINIT8ALL(a)                             (a,a,a,a,a,a,a,a)
+#define VINIT16ALL(a)                            (a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a)
+#else
+#define VINIT4(a,b,c,d)                          {a,b,c,d}
+#define VINIT8(a,b,c,d,e,f,g,h)                  {a,b,c,d,e,f,g,h}
+#define VINIT16(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p) {a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p}
+#define VINIT4ALL(a)                             {a,a,a,a}
+#define VINIT8ALL(a)                             {a,a,a,a,a,a,a,a}
+#define VINIT16ALL(a)                            {a,a,a,a,a,a,a,a,a,a,a,a,a,a,a,a}
+#endif
+#endif
+
 #endif
 
 /* end of machine.h */

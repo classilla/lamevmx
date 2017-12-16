@@ -38,6 +38,10 @@
 # include <config.h>
 #endif
 
+#if __ALTIVEC__
+#include <altivec.h>
+#endif
+
 #include "lame.h"
 #include "machine.h"
 #include "encoder.h"
@@ -66,6 +70,17 @@ fht(FLOAT * fz, int n)
     int     k4;
     FLOAT  *fi, *gi;
     FLOAT const *fn;
+#if __ALTIVEC__
+    float csvec[16] __attribute__ ((aligned (16)));
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
+    vector float vfi0,vfi1,vfi2,vfi3,vgi0,vgi1,vgi2,vgi3,vf0,vf1,vf2,vf3,vg0,vg1,vg2,vg3;
+    vector float vprev1,vprev2,vprev3,vprev4,vc1,vc2,vs1,vs2,vzero;
+    vector unsigned char vperm1,vperm2;
+    
+    vperm1 = (vector unsigned char)VINIT16(16,17,18,19,12,13,14,15,8,9,10,11,4,5,6,7);
+    vperm2 = (vector unsigned char)VINIT16(16,17,18,19,4,5,6,7,8,9,10,11,12,13,14,15);
+    vzero = vec_xor(vzero,vzero);
+#endif
 
     n <<= 1;            /* to get BLKSIZE, because of 3DNow! ASM routine */
     fn = fz + n;
@@ -103,6 +118,238 @@ fht(FLOAT * fz, int n)
         } while (fi < fn);
         c1 = tri[0];
         s1 = tri[1];
+#if __ALTIVEC__
+        if(kx < 4) {
+            for (i = 1; i < kx; i++) {
+                FLOAT   c2, s2;
+                c2 = 1 - (2 * s1) * s1;
+                s2 = (2 * s1) * c1;
+                fi = fz + i;
+                gi = fz + k1 - i;
+                do {
+                    FLOAT   a, b, g0, f0, f1, g1, f2, g2, f3, g3;
+                    b = s2 * fi[k1] - c2 * gi[k1];
+                    a = c2 * fi[k1] + s2 * gi[k1];
+                    f1 = fi[0] - a;
+                    f0 = fi[0] + a;
+                    g1 = gi[0] - b;
+                    g0 = gi[0] + b;
+                    b = s2 * fi[k3] - c2 * gi[k3];
+                    a = c2 * fi[k3] + s2 * gi[k3];
+                    f3 = fi[k2] - a;
+                    f2 = fi[k2] + a;
+                    g3 = gi[k2] - b;
+                    g2 = gi[k2] + b;
+                    b = s1 * f2 - c1 * g3;
+                    a = c1 * f2 + s1 * g3;
+                    fi[k2] = f0 - a;
+                    fi[0] = f0 + a;
+                    gi[k3] = g1 - b;
+                    gi[k1] = g1 + b;
+                    b = c1 * g2 - s1 * f3;
+                    a = s1 * g2 + c1 * f3;
+                    gi[k2] = g0 - a;
+                    gi[0] = g0 + a;
+                    fi[k3] = f1 - b;
+                    fi[k1] = f1 + b;
+                    gi += k4;
+                    fi += k4;
+                } while (fi < fn);
+                c2 = c1;
+                c1 = c2 * tri[0] - s1 * tri[1];
+                s1 = c2 * tri[1] + s1 * tri[0];
+            }
+        }
+        else {
+            FLOAT   c2, s2;
+            for(i = 1; i < 4; i++) {
+                c2 = 1 - (2*s1)*s1;
+                s2 = (2*s1)*c1;
+                csvec[i] = c1;
+                csvec[i+4] = c2;
+                csvec[i+8] = s1;
+                csvec[i+12] = s2;
+                c2 = c1;
+                c1 = c2 * tri[0] - s1 * tri[1];
+                s1 = c2 * tri[1] + s1 * tri[0];
+            }
+            vc1 = vec_ld(0,csvec);
+            vc2 = vec_ld(16,csvec);
+            vs1 = vec_ld(32,csvec);
+            vs2 = vec_ld(48,csvec);
+            fi = fz;
+            gi = fz + k1;
+            do {
+                vfi0 = vec_ld(0,fi);
+                vfi1 = vec_ld(0,fi+k1);
+                vfi2 = vec_ld(0,fi+k2);
+                vfi3 = vec_ld(0,fi+k3);
+                vprev1 = vec_ld(0,gi-4);
+                vprev2 = vec_ld(0,gi+k1-4);
+                vprev3 = vec_ld(0,gi+k2-4);
+                vprev4 = vec_ld(0,gi+k3-4);
+                vgi0 = vec_perm(vprev1,vprev1,vperm1);
+                vgi1 = vec_perm(vprev2,vprev2,vperm1);
+                vgi2 = vec_perm(vprev3,vprev3,vperm1);
+                vgi3 = vec_perm(vprev4,vprev4,vperm1);
+                
+                v1 = vec_madd(vfi1,vc2,vzero);
+                v2 = vec_madd(vfi1,vs2,vzero);
+                v3 = vec_madd(vfi3,vc2,vzero);
+                v4 = vec_madd(vfi3,vs2,vzero);
+                v5 = vec_madd(vgi1,vs2,v1);
+                v6 = vec_nmsub(vgi1,vc2,v2);
+                v7 = vec_madd(vgi3,vs2,v3);
+                v8 = vec_nmsub(vgi3,vc2,v4);
+                
+                vf0 = vec_add(vfi0,v5);
+                vf1 = vec_sub(vfi0,v5);
+                vg0 = vec_add(vgi0,v6);
+                vg1 = vec_sub(vgi0,v6);
+                vf2 = vec_add(vfi2,v7);
+                vf3 = vec_sub(vfi2,v7);
+                vg2 = vec_add(vgi2,v8);
+                vg3 = vec_sub(vgi2,v8);
+                
+                v1 = vec_madd(vf2,vc1,vzero);
+                v2 = vec_madd(vf2,vs1,vzero);
+                v3 = vec_madd(vg2,vs1,vzero);
+                v4 = vec_madd(vg2,vc1,vzero);
+                v5 = vec_madd(vg3,vs1,v1);
+                v6 = vec_nmsub(vg3,vc1,v2);
+                v7 = vec_madd(vf3,vc1,v3);
+                v8 = vec_nmsub(vf3,vs1,v4);
+                
+                v9 = vec_add(vf0,v5);
+                v10 = vec_sub(vf0,v5);
+                v11 = vec_add(vg1,v6);
+                v12 = vec_sub(vg1,v6);
+                v13 = vec_add(vg0,v7);
+                v14 = vec_sub(vg0,v7);
+                v15 = vec_add(vf1,v8);
+                v16 = vec_sub(vf1,v8);
+                
+                v1 = vec_perm(v9,vfi0,vperm2);
+                v2 = vec_perm(v10,vfi2,vperm2);
+                v3 = vec_perm(v15,vfi1,vperm2);
+                v4 = vec_perm(v16,vfi3,vperm2);
+                vec_st(v1,0,fi);
+                vec_st(v2,0,fi+k2);
+                vec_st(v3,0,fi+k1);
+                vec_st(v4,0,fi+k3);
+                
+                v1 = vec_perm(v11,vprev2,vperm1);
+                v2 = vec_perm(v12,vprev4,vperm1);
+                v3 = vec_perm(v13,vprev1,vperm1);
+                v4 = vec_perm(v14,vprev3,vperm1);
+                vec_st(v1,0,gi+k1-4);
+                vec_st(v2,0,gi+k3-4);
+                vec_st(v3,0,gi-4);
+                vec_st(v4,0,gi+k2-4);
+                
+                gi += k4;
+                fi += k4;
+            } while (fi<fn);
+            
+            /* rest loop */
+            
+            for (i = 4; i < kx; i+=4) {
+                int j;
+                for(j = 0; j < 4; j++) {
+                    c2 = 1 - (2*s1)*s1;
+                    s2 = (2*s1)*c1;
+                    csvec[j] = c1;
+                    csvec[j+4] = c2;
+                    csvec[j+8] = s1;
+                    csvec[j+12] = s2;
+                    c2 = c1;
+                    c1 = c2 * tri[0] - s1 * tri[1];
+                    s1 = c2 * tri[1] + s1 * tri[0];
+                }
+                vc1 = vec_ld(0,csvec);
+                vc2 = vec_ld(16,csvec);
+                vs1 = vec_ld(32,csvec);
+                vs2 = vec_ld(48,csvec);
+                fi = fz + i;
+                gi = fz + k1 - i;
+                do {
+                    vfi0 = vec_ld(0,fi);
+                    vfi1 = vec_ld(0,fi+k1);
+                    vfi2 = vec_ld(0,fi+k2);
+                    vfi3 = vec_ld(0,fi+k3);
+                    vprev1 = vec_ld(0,gi-4);
+                    v1 = vec_ld(0,gi);
+                    vprev2 = vec_ld(0,gi+k1-4);
+                    v2 = vec_ld(0,gi+k1);
+                    vprev3 = vec_ld(0,gi+k2-4);
+                    v3 = vec_ld(0,gi+k2);
+                    vprev4 = vec_ld(0,gi+k3-4);
+                    v4 = vec_ld(0,gi+k3);
+                    vgi0 = vec_perm(vprev1,v1,vperm1);
+                    vgi1 = vec_perm(vprev2,v2,vperm1);
+                    vgi2 = vec_perm(vprev3,v3,vperm1);
+                    vgi3 = vec_perm(vprev4,v4,vperm1);
+                    
+                    v1 = vec_madd(vfi1,vc2,vzero);
+                    v2 = vec_madd(vfi1,vs2,vzero);
+                    v3 = vec_madd(vfi3,vc2,vzero);
+                    v4 = vec_madd(vfi3,vs2,vzero);
+                    v5 = vec_madd(vgi1,vs2,v1);
+                    v6 = vec_nmsub(vgi1,vc2,v2);
+                    v7 = vec_madd(vgi3,vs2,v3);
+                    v8 = vec_nmsub(vgi3,vc2,v4);
+                    
+                    vf0 = vec_add(vfi0,v5);
+                    vf1 = vec_sub(vfi0,v5);
+                    vg0 = vec_add(vgi0,v6);
+                    vg1 = vec_sub(vgi0,v6);
+                    vf2 = vec_add(vfi2,v7);
+                    vf3 = vec_sub(vfi2,v7);
+                    vg2 = vec_add(vgi2,v8);
+                    vg3 = vec_sub(vgi2,v8);
+                    
+                    v1 = vec_madd(vf2,vc1,vzero);
+                    v2 = vec_madd(vf2,vs1,vzero);
+                    v3 = vec_madd(vg2,vs1,vzero);
+                    v4 = vec_madd(vg2,vc1,vzero);
+                    v5 = vec_madd(vg3,vs1,v1);
+                    v6 = vec_nmsub(vg3,vc1,v2);
+                    v7 = vec_madd(vf3,vc1,v3);
+                    v8 = vec_nmsub(vf3,vs1,v4);
+                    
+                    v9 = vec_add(vf0,v5);
+                    v10 = vec_sub(vf0,v5);
+                    v11 = vec_add(vg1,v6);
+                    v12 = vec_sub(vg1,v6);
+                    v13 = vec_add(vg0,v7);
+                    v14 = vec_sub(vg0,v7);
+                    v15 = vec_add(vf1,v8);
+                    v16 = vec_sub(vf1,v8);
+                    
+                    vec_st(v9,0,fi);
+                    vec_st(v10,0,fi+k2);
+                    vec_st(v15,0,fi+k1);
+                    vec_st(v16,0,fi+k3);
+                    
+                    v1 = vec_perm(v11,vprev2,vperm1);
+                    v2 = vec_perm(v12,vprev4,vperm1);
+                    v3 = vec_perm(v13,vprev1,vperm1);
+                    v4 = vec_perm(v14,vprev3,vperm1);
+                    vec_st(v1,0,gi+k1-4);
+                    vec_ste(v11,0,gi+k1);
+                    vec_st(v2,0,gi+k3-4);
+                    vec_ste(v12,0,gi+k3);
+                    vec_st(v3,0,gi-4);
+                    vec_ste(v13,0,gi);
+                    vec_st(v4,0,gi+k2-4);
+                    vec_ste(v14,0,gi+k2);
+                    
+                    gi += k4;
+                    fi += k4;
+                } while (fi<fn);
+            }
+        }
+#else
         for (i = 1; i < kx; i++) {
             FLOAT   c2, s2;
             c2 = 1 - (2 * s1) * s1;
@@ -142,6 +389,7 @@ fht(FLOAT * fz, int n)
             c1 = c2 * tri[0] - s1 * tri[1];
             s1 = c2 * tri[1] + s1 * tri[0];
         }
+#endif
         tri += 2;
     } while (k4 < n);
 }

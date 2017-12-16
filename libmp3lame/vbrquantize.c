@@ -26,6 +26,10 @@
 #  include <config.h>
 #endif
 
+#if __ALTIVEC__
+#undef TAKEHIRO_IEEE754_HACK
+#include <altivec.h>
+#endif
 
 #include "lame.h"
 #include "machine.h"
@@ -217,8 +221,23 @@ k_34_4(DOUBLEX x[4], int l3[4])
 static  FLOAT
 calc_sfb_noise_x34(const FLOAT * xr, const FLOAT * xr34, unsigned int bw, uint8_t sf)
 {
+#if __ALTIVEC__
+    float vpow[8] __attribute__ ((aligned (16)));
+    vector float v0, v1, v2, v3, v4, v5, v6,v7,v8,v9,v10,v11,v12,v13;
+    vector unsigned char vperm1, vperm2,vc1,vc2,vc3;
+    vector signed int vl1,vl2,vl3;
+    vector float vxfsf, vsfpow, vsfpow34, vabs, vzero;
+    unsigned int s1,s2,s3,s4,s5,s6,s7,s8;
+    const vector float const1 = (vector float)VINIT4(0.4053964553387788,3.404263724373839,5.465086767819913,1.0);
+    const vector float const2 = (vector float)VINIT4(7.719205369637751,10.93017829043677,0,0);
+#if _ARCH_PPC64
+    vector unsigned int vmask1,vmask2,vmask3;
+#else
+    vector unsigned char vperm3,vperm4,vc4,vc5,vc6,vmask;
+#endif
+#endif
     DOUBLEX x[4];
-    int     l3[4];
+    int     l3[4] __attribute__ ((aligned (16)));
     const FLOAT sfpow = pow20[sf + Q_MAX2]; /*pow(2.0,sf/4.0); */
     const FLOAT sfpow34 = ipow20[sf]; /*pow(sfpow,-3.0/4.0); */
 
@@ -226,6 +245,239 @@ calc_sfb_noise_x34(const FLOAT * xr, const FLOAT * xr34, unsigned int bw, uint8_
     unsigned int i = bw >> 2u;
     unsigned int const remaining = (bw & 0x03u);
 
+#if __ALTIVEC__
+    vpow[0] = sfpow;
+    vpow[1] = sfpow34;
+    vsfpow = vec_ld(0,vpow);
+    vxfsf = vec_xor(vxfsf,vxfsf);
+    vsfpow34 = vec_splat(vsfpow,1);
+    vsfpow = vec_splat(vsfpow,0);
+    vperm1 = vec_lvsl(0,xr);
+    vperm2 = vec_lvsl(0,xr34);
+    v0 = vec_ld(0,xr);
+    v1 = vec_ld(0,xr34);
+    vabs = (vector float)vec_splat_s32(-1);
+    vabs = (vector float)vec_sl((vector unsigned int)vabs, (vector unsigned int)vabs);
+    vzero = vec_xor(vzero,vzero);
+#if _ARCH_PPC64
+    vc1 = vec_splat_u8(1);
+    vc2 = vec_splat_u8(5);
+    vc3 = vec_sl(vc1,vc2);
+    vmask1 = (vector unsigned int)vec_splat_s32(-1);
+    vmask1 = vec_sro(vmask1,vc3);
+    vmask2 = vec_sro(vmask1,vc3);
+    vmask3 = vec_sro(vmask2,vc3);
+#else
+    vperm3 = (vector unsigned char)VINIT16(0,0,0,0,0,0,0,0,0,1,2,3,16,17,18,19);
+    vperm4 = vec_sld(vperm3,(vector unsigned char)vzero,8);
+    vmask = (vector unsigned char)VINIT16ALL(16);
+#endif
+    for (; i > 1; i -= 2) {
+        
+        v2 = vec_ld(16,xr34);
+        v3 = vec_ld(32,xr34);
+        v4 = vec_perm(v1,v2,vperm2);
+        v5 = vec_perm(v2,v3,vperm2);
+        v12 = vec_madd(v4,vsfpow34,vzero);
+        v13 = vec_madd(v5,vsfpow34,vzero);
+        v1 = v3;
+        
+        v2 = vec_floor(v12);
+        v3 = vec_floor(v13);
+        v4 = vec_splat(const1,2);
+        v5 = vec_splat(const1,1);
+        v6 = vec_splat(const2,1);
+        v7 = vec_splat(const2,0);
+        v8 = vec_madd(v2,v4,v5);
+        v9 = vec_madd(v3,v4,v5);
+        v10 = vec_madd(v2,v6,v7);
+        v11 = vec_madd(v3,v6,v7);
+        v4 = vec_splat(const1,0);
+        v5 = vec_splat(const1,3);
+        v8 = vec_madd(v8,v2,v4);
+        v9 = vec_madd(v9,v3,v4);
+        v10 = vec_madd(v10,v2,v5);
+        v11 = vec_madd(v11,v3,v5);
+        v6 = vec_re(v10);
+        v7 = vec_re(v11);
+        v10 = vec_nmsub(v10,v6,v5);
+        v11 = vec_nmsub(v11,v7,v5);
+        v10 = vec_madd(v10,v6,v6);
+        v11 = vec_madd(v11,v7,v7);
+        v10 = vec_madd(v8,v10,v12);
+        v11 = vec_madd(v9,v11,v13);
+        
+        vl1 = vec_cts(v10,0);
+        vl2 = vec_cts(v11,0);
+        vl3 = (vector signed int)vec_pack(vl1,vl2);
+        vec_st(vl3,0,l3);
+        
+        s1 = l3[0] >> 16;
+        s2 = l3[0] & 0xffff;
+        s3 = l3[1] >> 16;
+        s4 = l3[1] & 0xffff;
+        s5 = l3[2] >> 16;
+        s6 = l3[2] & 0xffff;
+        s7 = l3[3] >> 16;
+        s8 = l3[3] & 0xffff;
+        
+#if _ARCH_PPC64
+        v2 = vec_lde(0,pow43+s1);
+        v3 = vec_lde(0,pow43+s2);
+        v4 = vec_lde(0,pow43+s3);
+        v5 = vec_lde(0,pow43+s4);
+        v2 = vec_perm(v2,v2,vec_lvsl(0,pow43+s1));
+        v3 = vec_perm(v3,v3,vec_lvsl(-4,pow43+s2));
+        v4 = vec_perm(v4,v4,vec_lvsl(-8,pow43+s3));
+        v5 = vec_perm(v5,v5,vec_lvsl(-12,pow43+s4));
+        v12 = vec_sel(v2,v3,vmask1);
+        v12 = vec_sel(v12,v4,vmask2);
+        v12 = vec_sel(v12,v5,vmask3);
+        
+        v2 = vec_lde(0,pow43+s5);
+        v3 = vec_lde(0,pow43+s6);
+        v4 = vec_lde(0,pow43+s7);
+        v5 = vec_lde(0,pow43+s8);
+        v2 = vec_perm(v2,v2,vec_lvsl(0,pow43+s5));
+        v3 = vec_perm(v3,v3,vec_lvsl(-4,pow43+s6));
+        v4 = vec_perm(v4,v4,vec_lvsl(-8,pow43+s7));
+        v5 = vec_perm(v5,v5,vec_lvsl(-12,pow43+s8));
+        v13 = vec_sel(v2,v3,vmask1);
+        v13 = vec_sel(v13,v4,vmask2);
+        v13 = vec_sel(v13,v5,vmask3);
+#else
+        vc1 = vec_lvsl(0,pow43+s1);
+        vc2 = vec_lvsl(0,pow43+s2);
+        vc3 = vec_lvsl(0,pow43+s3);
+        vc4 = vec_lvsl(0,pow43+s4);
+        vc2 = vec_or(vc2,vmask);
+        vc4 = vec_or(vc4,vmask);
+        v2 = vec_lde(0,pow43+s1);
+        v3 = vec_lde(0,pow43+s2);
+        v4 = vec_lde(0,pow43+s3);
+        v5 = vec_lde(0,pow43+s4);
+        vc5 = vec_perm(vc1,vc2,vperm3);
+        vc6 = vec_perm(vc3,vc4,vperm4);
+        v6 = vec_perm(v2,v3,vc5);
+        v7 = vec_perm(v4,v5,vc6);
+        v12 = vec_sld(v6,v7,8);
+        
+        vc1 = vec_lvsl(0,pow43+s5);
+        vc2 = vec_lvsl(0,pow43+s6);
+        vc3 = vec_lvsl(0,pow43+s7);
+        vc4 = vec_lvsl(0,pow43+s8);
+        vc2 = vec_or(vc2,vmask);
+        vc4 = vec_or(vc4,vmask);
+        v2 = vec_lde(0,pow43+s5);
+        v3 = vec_lde(0,pow43+s6);
+        v4 = vec_lde(0,pow43+s7);
+        v5 = vec_lde(0,pow43+s8);
+        vc5 = vec_perm(vc1,vc2,vperm3);
+        vc6 = vec_perm(vc3,vc4,vperm4);
+        v6 = vec_perm(v2,v3,vc5);
+        v7 = vec_perm(v4,v5,vc6);
+        v13 = vec_sld(v6,v7,8);
+#endif
+        
+        v2 = vec_ld(16, xr);
+        v3 = vec_ld(32, xr);
+        v6 = vec_perm(v0,v2,vperm1);
+        v7 = vec_perm(v2,v3,vperm1);
+        v0 = v3;
+        v8 = vec_andc(v6,vabs);
+        v9 = vec_andc(v7,vabs);
+        v10 = vec_nmsub(vsfpow, v12, v8);
+        v11 = vec_nmsub(vsfpow, v13, v9);
+        vxfsf = vec_madd(v10, v10, vxfsf);
+        vxfsf = vec_madd(v11, v11, vxfsf);
+        
+        xr += 8;
+        xr34 += 8;
+    }
+    if (i) {
+#if _ARCH_PPC64
+        x[0] = sfpow34 * xr34[0];
+        x[1] = sfpow34 * xr34[1];
+        x[2] = sfpow34 * xr34[2];
+        x[3] = sfpow34 * xr34[3];
+
+        k_34_4(x, l3);
+
+        vpow[0] = pow43[l3[0]];
+        vpow[1] = pow43[l3[1]];
+        vpow[2] = pow43[l3[2]];
+        vpow[3] = pow43[l3[3]];
+        v1 = vec_ld(0, vpow);
+        v2 = vec_ld(16, xr);
+        v3 = vec_perm(v0,v2,vperm1);
+        v4 = vec_andc(v3,vabs);
+        v5 = vec_nmsub(vsfpow, v1, v4);
+        vxfsf = vec_madd(v5, v5, vxfsf);
+#else
+        v2 = vec_ld(16,xr34);
+        v3 = vec_perm(v1,v2,vperm2);
+        v4 = vec_madd(v3,vsfpow34,vzero);
+        vl1 = vec_cts(v4,0);
+        vec_st(vl1,0,l3);
+        
+        v5 = vec_lde(0,adj43+l3[0]);
+        v6 = vec_lde(0,adj43+l3[1]);
+        v7 = vec_lde(0,adj43+l3[2]);
+        v8 = vec_lde(0,adj43+l3[3]);
+        v9 = vec_perm(v5,v5,vec_lvsl(0,adj43+l3[0]));
+        v10 = vec_perm(v6,v6,vec_lvsl(-4,adj43+l3[1]));
+        v11 = vec_perm(v7,v7,vec_lvsl(-8,adj43+l3[2]));
+        v12 = vec_perm(v8,v8,vec_lvsl(-12,adj43+l3[3]));
+        v9 = vec_or(v9,v10);
+        v9 = vec_or(v9,v11);
+        v9 = vec_or(v9,v12);
+        
+        v10 = vec_add(v4,v9);
+        vl1 = vec_cts(v10,0);
+        vec_st(vl1,0,l3);
+        
+        v2 = vec_lde(0,pow43+l3[0]);
+        v3 = vec_lde(0,pow43+l3[1]);
+        v4 = vec_lde(0,pow43+l3[2]);
+        v5 = vec_lde(0,pow43+l3[3]);
+        v6 = vec_perm(v2,v2,vec_lvsl(0,pow43+l3[0]));
+        v7 = vec_perm(v3,v3,vec_lvsl(-4,pow43+l3[1]));
+        v8 = vec_perm(v4,v4,vec_lvsl(-8,pow43+l3[2]));
+        v9 = vec_perm(v5,v5,vec_lvsl(-12,pow43+l3[3]));
+        v6 = vec_or(v6,v7);
+        v6 = vec_or(v6,v8);
+        v6 = vec_or(v6,v9);
+        
+        v2 = vec_ld(16, xr);
+        v3 = vec_perm(v0,v2,vperm1);
+        v4 = vec_andc(v3,vabs);
+        v5 = vec_nmsub(vsfpow, v6, v4);
+        vxfsf = vec_madd(v5, v5, vxfsf);
+#endif
+        xr += 4;
+        xr34 += 4;
+    }
+	if (remaining) {
+        x[0] = x[1] = x[2] = x[3] = 0;
+        switch( remaining ) {
+        case 3: x[2] = sfpow34 * xr34[2];
+        case 2: x[1] = sfpow34 * xr34[1];
+        case 1: x[0] = sfpow34 * xr34[0];
+        }
+
+        k_34_4(x, l3);
+        x[0] = x[1] = x[2] = x[3] = 0;
+
+        switch( remaining ) {
+        case 3: x[2] = fabsf(xr[2]) - sfpow * pow43[l3[2]];
+        case 2: x[1] = fabsf(xr[1]) - sfpow * pow43[l3[1]];
+        case 1: x[0] = fabsf(xr[0]) - sfpow * pow43[l3[0]];
+        }
+        xfsf += (x[0] * x[0] + x[1] * x[1]) + (x[2] * x[2] + x[3] * x[3]);
+    }
+    vec_st(vxfsf,0,vpow);
+    return xfsf + vpow[0] + vpow[1] + vpow[2] + vpow[3];
+#else
     while (i-- > 0) {
         x[0] = sfpow34 * xr34[0];
         x[1] = sfpow34 * xr34[1];
@@ -262,6 +514,7 @@ calc_sfb_noise_x34(const FLOAT * xr, const FLOAT * xr34, unsigned int bw, uint8_
         xfsf += (x[0] * x[0] + x[1] * x[1]) + (x[2] * x[2] + x[3] * x[3]);
     }
     return xfsf;
+#endif
 }
 
 

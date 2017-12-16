@@ -93,10 +93,17 @@ extern  "C" {
 
 /* log/log10 approximations */
 #ifdef USE_FAST_LOG
+#if defined(__ALTIVEC__) && !defined(_ARCH_PPC64)
+#define         FAST_LOG10(x)       (fast_log10_altivec(x))
+#define         FAST_LOG(x)         (fast_loge_altivec(x))
+#define         FAST_LOG10_X(x,y)   (fast_log10_altivec(x)*(y))
+#define         FAST_LOG_X(x,y)     (fast_loge_altivec(x)*(y))
+#else
 #define         FAST_LOG10(x)       (fast_log2(x)*(LOG2/LOG10))
 #define         FAST_LOG(x)         (fast_log2(x)*LOG2)
 #define         FAST_LOG10_X(x,y)   (fast_log2(x)*(LOG2/LOG10*(y)))
 #define         FAST_LOG_X(x,y)     (fast_log2(x)*(LOG2*(y)))
+#endif
 #else
 #define         FAST_LOG10(x)       log10(x)
 #define         FAST_LOG(x)         log(x)
@@ -186,14 +193,14 @@ extern  "C" {
      */
 
     typedef struct {
-        FLOAT   masking_lower[CBANDS];
+        FLOAT   masking_lower[CBANDS] __attribute__ ((aligned (16)));
         FLOAT   minval[CBANDS];
         FLOAT   rnumlines[CBANDS];
         FLOAT   mld_cb[CBANDS];
         FLOAT   mld[Max(SBMAX_l,SBMAX_s)];
         FLOAT   bo_weight[Max(SBMAX_l,SBMAX_s)]; /* band weight long scalefactor bands, at transition */
         FLOAT   attack_threshold; /* short block tuning */
-        int     s3ind[CBANDS][2];
+        int     s3ind[CBANDS][4] __attribute__ ((aligned (16)));
         int     numlines[CBANDS];
         int     bm[Max(SBMAX_l,SBMAX_s)];
         int     bo[Max(SBMAX_l,SBMAX_s)];
@@ -219,7 +226,7 @@ extern  "C" {
 
     typedef struct {
 
-        FLOAT   nb_l1[4][CBANDS], nb_l2[4][CBANDS];
+        FLOAT   nb_l1[4][CBANDS] __attribute__ ((aligned (16))), nb_l2[4][CBANDS] __attribute__ ((aligned (16)));
         FLOAT   nb_s1[4][CBANDS], nb_s2[4][CBANDS];
 
         III_psy_xmin thm[4];
@@ -246,7 +253,7 @@ extern  "C" {
     /* variables used by encoder.c */
     typedef struct {
         /* variables for newmdct.c */
-        FLOAT   sb_sample[2][2][18][SBLIMIT];
+        FLOAT   sb_sample[2][2][18][SBLIMIT] __attribute__ ((aligned (16)));
         FLOAT   amp_filter[32];
 
         /* variables used by util.c */
@@ -293,7 +300,7 @@ extern  "C" {
 #ifndef  MFSIZE
 # define MFSIZE  ( 3*1152 + ENCDELAY - MDCTDELAY )
 #endif
-        sample_t mfbuf[2][MFSIZE];
+        sample_t mfbuf[2][MFSIZE] __attribute__ ((aligned (16)));
 
         int     mf_samples_to_encode;
         int     mf_size;
@@ -567,7 +574,12 @@ extern  "C" {
 
 /* log/log10 approximations */
     extern void init_log_table(void);
+#if defined(__ALTIVEC__) && !defined(_ARCH_PPC64)
+    extern ieee754_float32_t fast_log10_altivec(ieee754_float32_t x);
+    extern ieee754_float32_t fast_loge_altivec(ieee754_float32_t x);
+#else
     extern ieee754_float32_t fast_log2(ieee754_float32_t x);
+#endif
 
     int     isResamplingNecessary(SessionConfig_t const* cfg);
 

@@ -27,6 +27,11 @@
 # include <config.h>
 #endif
 
+#if __ALTIVEC__
+#undef TAKEHIRO_IEEE754_HACK
+#include <altivec.h>
+#endif
+
 
 #include "lame.h"
 #include "machine.h"
@@ -751,6 +756,39 @@ calc_xmin(lame_internal_flags const *gfc,
 static  FLOAT
 calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT step)
 {
+#if __ALTIVEC__
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,va,vb,vstep,vzero,vnoise1,vnoise2,vix01;
+    vector unsigned char vperm1,vperm2,vperm5,vperm6;
+    vector signed int vx1,vx2,vx3,vx4,vx5,vx6,vx7,vshamt,vone;
+#if _ARCH_PPC64
+    vector unsigned int vmask1,vmask2,vmask3;
+    vector float v10,v11,v12,v13,v14,v15,v16,v17;
+#else
+    vector unsigned char vc1,vc2,vc3,vc4,vc5,vc6,vperm3,vperm4,vmask;
+#endif
+    float temp[4] __attribute__ ((aligned (16)));
+    
+    temp[0] = step;
+    vstep = vec_ld(0,temp);
+    vzero = vec_xor(vzero,vzero);
+    vperm6 = (vector unsigned char)VINIT16(0,0,3,19,0,0,7,23,0,0,11,27,0,0,15,31);
+    vperm5 = vec_sld(vperm6,vperm6,2);
+#if _ARCH_PPC64
+    vmask1 = vec_splat_u32(-1);
+    vmask2 = vec_sld((vector unsigned int)vzero,vmask1,8);
+    vmask3 = vec_sld((vector unsigned int)vzero,vmask1,4);
+    vmask1 = vec_sld((vector unsigned int)vzero,vmask1,12);
+#else
+    vperm3 = (vector unsigned char)VINIT16(0,0,0,0,0,0,0,0,0,1,2,3,16,17,18,19);
+    vperm4 = vec_sld(vperm3,(vector unsigned char)vzero,8);
+    vmask = (vector unsigned char)VINIT16ALL(16);
+#endif
+    vstep = vec_splat(vstep,0);
+    vnoise1 = vec_xor(vnoise1,vnoise1);
+    vnoise2 = vec_xor(vnoise2,vnoise2);
+    vone = vec_splat_s32(1);
+    vshamt = vec_splat_s32(2);
+#endif
     FLOAT   noise = 0;
     int     j = *startline;
     const int *const ix = cod_info->l3_enc;
@@ -767,9 +805,55 @@ calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT s
         }
     }
     else if (j > cod_info->big_values) {
-        FLOAT   ix01[2];
+        FLOAT   ix01[4] __attribute__ ((aligned (16)));
         ix01[0] = 0;
         ix01[1] = step;
+#if __ALTIVEC__
+        vix01 = vec_ld(0,ix01);
+        v1 = vec_ld(0,cod_info->xr+j);
+        vperm1 = vec_lvsl(0,cod_info->xr+j);
+        vx1 = vec_ld(0,ix+j);
+        vperm2 = vec_lvsl(0,ix+j);
+        for(;l>1;l-=2) {
+            v2 = vec_ld(16,cod_info->xr+j);
+            vx2 = vec_ld(16,ix+j);
+            v3 = vec_perm(v1,v2,vperm1);
+            vx3 = vec_perm(vx1,vx2,vperm2);
+            va = vec_abs(v3);
+            v1 = v2;
+            vx1 = vx2;
+            
+            vx4 = vec_sl(vx3,(vector unsigned int)vshamt);
+            vx5 = vec_add(vx4,vone);
+            vx6 = vec_add(vx4,vshamt);
+            vx7 = vec_add(vx5,vshamt);
+            vx2 = vec_perm(vx4,vx5,vperm5);
+            vx3 = vec_perm(vx6,vx7,vperm6);
+            vx4 = vec_or(vx2,vx3);
+            
+            v2 = vec_perm(vix01,vix01,(vector unsigned char)vx4);
+            va = vec_sub(va,v2);
+            
+            vnoise1 = vec_madd(va,va,vnoise1);
+            
+            j += 4;
+        }
+        v1 = vec_sld(vnoise1,vnoise1,8);
+        v2 = vec_add(vnoise1,v1);
+        v3 = vec_sld(v2,v2,4);
+        v4 = vec_add(v2,v3);
+        v5 = vec_perm(v4,v4,vec_lvsr(0,&noise));
+        vec_ste(v5,0,&noise);
+		if(l) {
+            FLOAT   temp;
+            temp = fabs(cod_info->xr[j]) - ix01[ix[j]];
+            j++;
+            noise += temp * temp;
+            temp = fabs(cod_info->xr[j]) - ix01[ix[j]];
+            j++;
+            noise += temp * temp;
+        }
+#else
         while (l--) {
             FLOAT   temp;
             temp = fabs(cod_info->xr[j]) - ix01[ix[j]];
@@ -779,8 +863,138 @@ calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT s
             j++;
             noise += temp * temp;
         }
+#endif
     }
     else {
+#if __ALTIVEC__
+        vperm1 = vec_lvsl(0,cod_info->xr+j);
+        v1 = vec_ld(0,cod_info->xr+j);
+        for(;l>3;l-=4) {
+            v2 = vec_ld(16,cod_info->xr+j);
+            v3 = vec_ld(32,cod_info->xr+j);
+            v4 = vec_perm(v1,v2,vperm1);
+            v5 = vec_perm(v2,v3,vperm1);
+            va = vec_abs(v4);
+            vb = vec_abs(v5);
+            v1 = v3;
+            
+#if _ARCH_PPC64
+            v2 = vec_lde(0,pow43+ix[j]);
+            v6 = vec_lde(0,pow43+ix[j+1]);
+            v10 = vec_lde(0,pow43+ix[j+2]);
+            v14 = vec_lde(0,pow43+ix[j+3]);
+            v4 = vec_perm(v2,v2,vec_lvsl(0,pow43+ix[j]));
+            v8 = vec_perm(v6,v6,vec_lvsl(-4,pow43+ix[j+1]));
+            v12 = vec_perm(v10,v10,vec_lvsl(-8,pow43+ix[j+2]));
+            v16 = vec_perm(v14,v14,vec_lvsl(-12,pow43+ix[j+3]));
+            v4 = vec_sel(v4,v8,vmask1);
+            v4 = vec_sel(v4,v12,vmask2);
+            v4 = vec_sel(v4,v16,vmask3);
+            va = vec_nmsub(v4,vstep,va);
+#else
+            vc1 = vec_lvsl(0,pow43+ix[j]);
+            vc2 = vec_lvsl(0,pow43+ix[j+1]);
+            vc3 = vec_lvsl(0,pow43+ix[j+2]);
+            vc4 = vec_lvsl(0,pow43+ix[j+3]);
+            vc2 = vec_or(vc2,vmask);
+            vc4 = vec_or(vc4,vmask);
+            v2 = vec_lde(0,pow43+ix[j]);
+            v3 = vec_lde(0,pow43+ix[j+1]);
+            v4 = vec_lde(0,pow43+ix[j+2]);
+            v5 = vec_lde(0,pow43+ix[j+3]);
+            vc5 = vec_perm(vc1,vc2,vperm3);
+            vc6 = vec_perm(vc3,vc4,vperm4);
+            v6 = vec_perm(v2,v3,vc5);
+            v7 = vec_perm(v4,v5,vc6);
+            v8 = vec_sld(v6,v7,8);
+            va = vec_nmsub(v8,vstep,va);
+#endif
+            j+=4;
+            
+#if _ARCH_PPC64
+            v3 = vec_lde(0,pow43+ix[j]);
+            v7 = vec_lde(0,pow43+ix[j+1]);
+            v11 = vec_lde(0,pow43+ix[j+2]);
+            v15 = vec_lde(0,pow43+ix[j+3]);
+            v5 = vec_perm(v3,v3,vec_lvsl(0,pow43+ix[j]));
+            v9 = vec_perm(v7,v7,vec_lvsl(-4,pow43+ix[j+1]));
+            v13 = vec_perm(v11,v11,vec_lvsl(-8,pow43+ix[j+2]));
+            v17 = vec_perm(v15,v15,vec_lvsl(-12,pow43+ix[j+3]));
+            v5 = vec_sel(v5,v9,vmask1);
+            v5 = vec_sel(v5,v13,vmask2);
+            v5 = vec_sel(v5,v17,vmask3);
+            vb = vec_nmsub(v5,vstep,vb);
+#else
+            vc1 = vec_lvsl(0,pow43+ix[j]);
+            vc2 = vec_lvsl(0,pow43+ix[j+1]);
+            vc3 = vec_lvsl(0,pow43+ix[j+2]);
+            vc4 = vec_lvsl(0,pow43+ix[j+3]);
+            vc2 = vec_or(vc2,vmask);
+            vc4 = vec_or(vc4,vmask);
+            v2 = vec_lde(0,pow43+ix[j]);
+            v3 = vec_lde(0,pow43+ix[j+1]);
+            v4 = vec_lde(0,pow43+ix[j+2]);
+            v5 = vec_lde(0,pow43+ix[j+3]);
+            vc5 = vec_perm(vc1,vc2,vperm3);
+            vc6 = vec_perm(vc3,vc4,vperm4);
+            v6 = vec_perm(v2,v3,vc5);
+            v7 = vec_perm(v4,v5,vc6);
+            v8 = vec_sld(v6,v7,8);
+            vb = vec_nmsub(v8,vstep,vb);
+#endif
+            
+            vnoise1 = vec_madd(va,va,vnoise1);
+            vnoise2 = vec_madd(vb,vb,vnoise2);
+            
+            j+=4;
+        }
+        vnoise1 = vec_add(vnoise1,vnoise2);
+        
+        for(;l>1;l-=2) {
+            v2 = vec_ld(16,cod_info->xr+j);
+            v4 = vec_perm(v1,v2,vperm1);
+            va = vec_abs(v4);
+            v1 = v2;
+            
+            v2 = vec_lde(0,pow43+ix[j]);
+            v3 = vec_lde(0,pow43+ix[j+1]);
+            v4 = vec_lde(0,pow43+ix[j+2]);
+            v5 = vec_lde(0,pow43+ix[j+3]);
+            v6 = vec_perm(v2,v2,vec_lvsl(0,pow43+ix[j]));
+            v7 = vec_perm(v3,v3,vec_lvsl(-4,pow43+ix[j+1]));
+            v8 = vec_perm(v4,v4,vec_lvsl(-8,pow43+ix[j+2]));
+            v9 = vec_perm(v5,v5,vec_lvsl(-12,pow43+ix[j+3]));
+#if _ARCH_PPC64
+            v6 = vec_sel(v6,v7,vmask1);
+            v6 = vec_sel(v6,v8,vmask2);
+            v6 = vec_sel(v6,v9,vmask3);
+#else
+            v6 = vec_or(v6,v7);
+            v6 = vec_or(v6,v8);
+            v6 = vec_or(v6,v9);
+#endif
+            va = vec_nmsub(v6,vstep,va);
+            
+            vnoise1 = vec_madd(va,va,vnoise1);
+            
+            j += 4;
+        }
+        v1 = vec_sld(vnoise1,vnoise1,8);
+        v2 = vec_add(vnoise1,v1);
+        v3 = vec_sld(v2,v2,4);
+        v4 = vec_add(v2,v3);
+        v5 = vec_perm(v4,v4,vec_lvsr(0,&noise));
+        vec_ste(v5,0,&noise);
+        if(l) {
+            FLOAT   temp;
+            temp = fabs(cod_info->xr[j]) - pow43[ix[j]] * step;
+            j++;
+            noise += temp * temp;
+            temp = fabs(cod_info->xr[j]) - pow43[ix[j]] * step;
+            j++;
+            noise += temp * temp;
+        }
+#else
         while (l--) {
             FLOAT   temp;
             temp = fabs(cod_info->xr[j]) - pow43[ix[j]] * step;
@@ -790,6 +1004,7 @@ calc_noise_core_c(const gr_info * const cod_info, int *startline, int l, FLOAT s
             j++;
             noise += temp * temp;
         }
+#endif
     }
 
     *startline = j;

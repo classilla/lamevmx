@@ -406,7 +406,7 @@ const uint8_t t33l[] = {
 };
 
 
-const struct huffcodetab ht[HTN] = {
+const struct huffcodetab ht[HTN] __attribute__ ((aligned (16))) = {
     /* xlen, linmax, table, hlen */
     {0, 0, NULL, NULL},
     {2, 0, t1HB, t1l},

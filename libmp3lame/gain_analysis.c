@@ -92,6 +92,10 @@
 #include <config.h>
 #endif
 
+#if __ALTIVEC__
+#include <altivec.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,6 +113,67 @@
 
 
 /*lint -save -e736 loss of precision */
+#if __ALTIVEC__
+static const Float_t ABYule[9][2 * YULE_ORDER + 1 + 3] __attribute__ ((aligned (16))) = {
+    {0.03857599435200, -3.84664617118067, -0.02160367184185, 7.81501653005538, -0.00123395316851,
+     -11.34170355132042, -0.00009291677959, 13.05504219327545, -0.01655260341619,
+     -12.28759895145294, 0.02161526843274, 9.48293806319790, -0.02074045215285, -5.87257861775999,
+     0.00594298065125, 2.75465861874613, 0.00306428023191, -0.86984376593551, 0.00012025322027,
+     0.13919314567432, 0.00288463683916, 0.0, 0.0, 0.0},
+    {0.05418656406430, -3.47845948550071, -0.02911007808948, 6.36317777566148, -0.00848709379851,
+     -8.54751527471874, -0.00851165645469, 9.47693607801280, -0.00834990904936, -8.81498681370155,
+     0.02245293253339, 6.85401540936998, -0.02596338512915, -4.39470996079559, 0.01624864962975,
+     2.19611684890774, -0.00240879051584, -0.75104302451432, 0.00674613682247, 0.13149317958808,
+     -0.00187763777362, 0.0, 0.0, 0.0},
+    {0.15457299681924, -2.37898834973084, -0.09331049056315, 2.84868151156327, -0.06247880153653,
+     -2.64577170229825, 0.02163541888798, 2.23697657451713, -0.05588393329856, -1.67148153367602,
+     0.04781476674921, 1.00595954808547, 0.00222312597743, -0.45953458054983, 0.03174092540049,
+     0.16378164858596, -0.01390589421898, -0.05032077717131, 0.00651420667831, 0.02347897407020,
+     -0.00881362733839, 0.0, 0.0, 0.0},
+    {0.30296907319327, -1.61273165137247, -0.22613988682123, 1.07977492259970, -0.08587323730772,
+     -0.25656257754070, 0.03282930172664, -0.16276719120440, -0.00915702933434, -0.22638893773906,
+     -0.02364141202522, 0.39120800788284, -0.00584456039913, -0.22138138954925, 0.06276101321749,
+     0.04500235387352, -0.00000828086748, 0.02005851806501, 0.00205861885564, 0.00302439095741,
+     -0.02950134983287, 0.0, 0.0, 0.0},
+    {0.33642304856132, -1.49858979367799, -0.25572241425570, 0.87350271418188, -0.11828570177555,
+     0.12205022308084, 0.11921148675203, -0.80774944671438, -0.07834489609479, 0.47854794562326,
+     -0.00469977914380, -0.12453458140019, -0.00589500224440, -0.04067510197014, 0.05724228140351,
+     0.08333755284107, 0.00832043980773, -0.04237348025746, -0.01635381384540, 0.02977207319925,
+     -0.01760176568150, 0.0, 0.0, 0.0},
+    {0.44915256608450, -0.62820619233671, -0.14351757464547, 0.29661783706366, -0.22784394429749,
+     -0.37256372942400, -0.01419140100551, 0.00213767857124, 0.04078262797139, -0.42029820170918,
+     -0.12398163381748, 0.22199650564824, 0.04097565135648, 0.00613424350682, 0.10478503600251,
+     0.06747620744683, -0.01863887810927, 0.05784820375801, -0.03193428438915, 0.03222754072173,
+     0.00541907748707, 0.0, 0.0, 0.0},
+    {0.56619470757641, -1.04800335126349, -0.75464456939302, 0.29156311971249, 0.16242137742230,
+     -0.26806001042947, 0.16744243493672, 0.00819999645858, -0.18901604199609, 0.45054734505008,
+     0.30931782841830, -0.33032403314006, -0.27562961986224, 0.06739368333110, 0.00647310677246,
+     -0.04784254229033, 0.08647503780351, 0.01639907836189, -0.03788984554840, 0.01807364323573,
+     -0.00588215443421, 0.0, 0.0, 0.0},
+    {0.58100494960553, -0.51035327095184, -0.53174909058578, -0.31863563325245, -0.14289799034253,
+     -0.20256413484477, 0.17520704835522, 0.14728154134330, 0.02377945217615, 0.38952639978999,
+     0.15558449135573, -0.23313271880868, -0.25344790059353, -0.05246019024463, 0.01628462406333,
+     -0.02505961724053, 0.06920467763959, 0.02442357316099, -0.03721611395801, 0.01818801111503,
+     -0.00749618797172, 0.0, 0.0, 0.0},
+    {0.53648789255105, -0.25049871956020, -0.42163034350696, -0.43193942311114, -0.00275953611929,
+     -0.03424681017675, 0.04267842219415, -0.04678328784242, -0.10214864179676, 0.26408300200955,
+     0.14590772289388, 0.15113130533216, -0.02459864859345, -0.17556493366449, -0.11202315195388,
+     -0.18823009262115, -0.04060034127000, 0.05477720428674, 0.04788665548180, 0.04704409688120,
+     -0.02217936801134, 0.0, 0.0, 0.0}
+};
+
+static const Float_t ABButter[9][2 * BUTTER_ORDER + 1 + 3] __attribute__ ((aligned (16))) = {
+    {0.98621192462708, -1.97223372919527, -1.97242384925416, 0.97261396931306, 0.98621192462708, 0.0, 0.0, 0.0},
+    {0.98500175787242, -1.96977855582618, -1.97000351574484, 0.97022847566350, 0.98500175787242, 0.0, 0.0, 0.0},
+    {0.97938932735214, -1.95835380975398, -1.95877865470428, 0.95920349965459, 0.97938932735214, 0.0, 0.0, 0.0},
+    {0.97531843204928, -1.95002759149878, -1.95063686409857, 0.95124613669835, 0.97531843204928, 0.0, 0.0, 0.0},
+    {0.97316523498161, -1.94561023566527, -1.94633046996323, 0.94705070426118, 0.97316523498161, 0.0, 0.0, 0.0},
+    {0.96454515552826, -1.92783286977036, -1.92909031105652, 0.93034775234268, 0.96454515552826, 0.0, 0.0, 0.0},
+    {0.96009142950541, -1.91858953033784, -1.92018285901082, 0.92177618768381, 0.96009142950541, 0.0, 0.0, 0.0},
+    {0.95856916599601, -1.91542108074780, -1.91713833199203, 0.91885558323625, 0.95856916599601, 0.0, 0.0, 0.0},
+    {0.94597685600279, -1.88903307939452, -1.89195371200558, 0.89487434461664, 0.94597685600279, 0.0, 0.0, 0.0}
+};
+#else
 static const Float_t ABYule[9][multiple_of(4, 2 * YULE_ORDER + 1)] = {
     /* 20                 18                 16                 14                 12                 10                 8                  6                  4                  2                 0                 19                 17                 15                 13                 11                 9                  7                  5                  3                  1              */
     { 0.00288463683916,  0.00012025322027,  0.00306428023191,  0.00594298065125, -0.02074045215285,  0.02161526843274, -0.01655260341619, -0.00009291677959, -0.00123395316851, -0.02160367184185, 0.03857599435200, 0.13919314567432, -0.86984376593551,  2.75465861874613, -5.87257861775999,  9.48293806319790,-12.28759895145294, 13.05504219327545,-11.34170355132042,  7.81501653005538, -3.84664617118067},
@@ -134,6 +199,7 @@ static const Float_t ABButter[9][multiple_of(4, 2 * BUTTER_ORDER + 1)] = {
     {0.95856916599601, 0.91885558323625, -1.91713833199203, -1.91542108074780, 0.95856916599601},
     {0.94597685600279, 0.89487434461664, -1.89195371200558, -1.88903307939452, 0.94597685600279}
 };
+#endif
 
 /*lint -restore */
 
@@ -142,6 +208,191 @@ static const Float_t ABButter[9][multiple_of(4, 2 * BUTTER_ORDER + 1)] = {
 #endif
 
 /* When calling this procedure, make sure that ip[-order] and op[-order] point to real data! */
+
+#if __ALTIVEC__
+
+static void
+filterIntegrated (const Float_t* input, Float_t* output, Float_t* output2, size_t nSamples, const Float_t* kernel, const Float_t* kernel2)
+{
+	vector float v1,v2,v3,v4,v5,v6,vbase;
+	vector float vmask1,vmask2,vout1,vout2,vout3,vout4,vzero,vkernel1,vkernel2,vkernel3,vkernel4,vkernel5,vkernel6,vkernel7,vkernel8;
+	vector float vo1, vo2, vo3, vo4, vi2, vi3;
+	vector unsigned char vc1,vc2,vc3,vc4,vc5,vperm1,vperm2,vperm4,vperm5,vperm6;
+	
+	vbase = (vector float)VINIT4ALL(1e-10f);
+	vperm1 = (vector unsigned char)VINIT16(24,25,26,27,16,17,18,19,8,9,10,11,0,1,2,3);
+	vperm2 = (vector unsigned char)VINIT16(28,29,30,31,20,21,22,23,12,13,14,15,4,5,6,7);
+	vc1 = vec_splat_u8(1);
+	vc2 = vec_splat_u8(5);
+	vc3 = vec_sl(vc1,vc2);
+	vc4 = vec_sl(vc3,vc1);
+	vc5 = vec_or(vc3,vc4);
+	v1 = (vector float)vec_splat_s32(-1);
+	vmask1 = vec_sro(v1,vc3);
+	vmask2 = vec_sro(v1,vc4);
+	vzero = vec_xor(vzero,vzero);
+	
+	v1 = vec_ld(0,kernel);
+	v2 = vec_ld(16,kernel);
+	v3 = vec_ld(32,kernel);
+	v4 = vec_ld(48,kernel);
+	v5 = vec_ld(64,kernel);
+	v6 = vec_ld(80,kernel);
+	vkernel1 = vec_perm(v1,v2,vperm1);
+	vkernel2 = vec_perm(v1,v2,vperm2);
+	vkernel3 = vec_perm(v3,v4,vperm1);
+	vkernel4 = vec_perm(v3,v4,vperm2);
+	vkernel5 = vec_perm(v5,v6,vperm1);
+	vkernel6 = vec_perm(v5,v6,vperm2);
+	vkernel5 = vec_and(vkernel5,vmask1);
+	vkernel6 = vec_and(vkernel6,vmask2);
+	
+	v1 = vec_ld(0,kernel2);
+	v2 = vec_ld(16,kernel2);
+	vkernel7 = vec_perm(v1,v2,vperm1);
+	vkernel8 = vec_perm(v1,v2,vperm2);
+	vkernel7 = vec_and(vkernel7,vmask1);
+	vkernel8 = vec_and(vkernel8,vmask2);
+	
+	vperm4 = vec_lvsl(0,input-7);
+	vperm5 = vec_lvsl(0,output-4);
+	
+	v1 = vec_ld(15,input-7);
+	v2 = vec_ld(0,input-7);
+	v3 = vec_ld(0,input-10);
+	v4 = vec_ld(15,input-11);
+	vi2 = vec_perm(v2,v1,vperm4);
+	vi3 = vec_perm(v3,v4,vec_lvsl(0,input-10));
+	vi3 = vec_sro(vi3,vc3);
+	
+	v1 = vec_ld(15,output-4);
+	v2 = vec_ld(0,output-4);
+	v3 = vec_ld(0,output-8);
+	v4 = vec_ld(0,output-10);
+	v5 = vec_ld(15,output-10);
+	vo1 = vec_perm(v2,v1,vperm5);
+	vo2 = vec_perm(v3,v2,vperm5);
+	vo3 = vec_perm(v4,v5,vec_lvsl(0,output-10));
+	vo3 = vec_sro(vo3,vc4);
+	
+	v1 = vec_ld(15,output2-2);
+	v2 = vec_ld(0,output2-2);
+	vo4 = vec_perm(v2,v1,vec_lvsl(0,output2-2));
+	vo4 = vec_sro(vo4,vc4);
+	
+	vperm4 = vec_lvsl(0,input-3);
+	vperm5 = vec_lvsr(0,output);
+	
+	/* 1st loop */
+	v1 = vec_ld(15,input-3);
+	v3 = vec_ld(0,input-3);
+	v5 = vec_perm(v3,v1,vperm4);
+		
+	vout1 = vec_madd(v5,vkernel1,vbase);
+	vout2 = vec_madd(vo1,vkernel2,vbase);
+
+	vout1 = vec_madd(vi2,vkernel3,vout1);
+	vout2 = vec_madd(vo2,vkernel4,vout2);
+
+	vout1 = vec_madd(vi3,vkernel5,vout1);
+	vout2 = vec_madd(vo3,vkernel6,vout2);
+		
+	vi3 = vec_sld(vi3,vi2,4);
+	vi2 = vec_sld(vi2,v5,4);
+		
+	vout1 = vec_sub(vout1,vout2);
+	
+	v1 = vec_slo(vout1,vc3);
+	v2 = vec_slo(vout1,vc4);
+	v3 = vec_slo(vout1,vc5);
+	vout1 = vec_add(vout1,v1);
+	vout2 = vec_add(v2,v3);
+	vout1 = vec_add(vout1,vout2);
+		
+	vo3 = vec_sld(vo3,vo2,4);
+	vo2 = vec_sld(vo2,vo1,4);
+	vo1 = vec_sld(vo1,vout1,4);
+		
+	vout2 = vec_perm(vout1,vout1,vperm5);
+	vec_ste(vout2,0,output);
+		
+	++output;
+	++input;
+	--nSamples;
+	
+	while(nSamples--) {
+		vperm4 = vec_lvsl(0,input-3);
+		vperm5 = vec_lvsr(0,output);
+		vperm6 = vec_lvsr(0,output2);
+		
+		v1 = vec_ld(15,input-3);
+		v3 = vec_ld(0,input-3);
+		v5 = vec_perm(v3,v1,vperm4);
+		
+		vout1 = vec_madd(v5,vkernel1,vbase);
+		vout2 = vec_madd(vo1,vkernel2,vbase);
+
+		vout1 = vec_madd(vi2,vkernel3,vout1);
+		vout2 = vec_madd(vo2,vkernel4,vout2);
+
+		vout1 = vec_madd(vi3,vkernel5,vout1);
+		vout2 = vec_madd(vo3,vkernel6,vout2);
+		
+		vout3 = vec_nmsub(vo4,vkernel8,vzero);
+		vout4 = vec_madd(vo1,vkernel7,vout3);
+		
+		vi3 = vec_sld(vi3,vi2,4);
+		vi2 = vec_sld(vi2,v5,4);
+		
+		vout1 = vec_sub(vout1,vout2);
+		
+		v1 = vec_slo(vout1,vc3);
+		v2 = vec_slo(vout1,vc4);
+		v3 = vec_slo(vout1,vc5);
+		vout1 = vec_add(vout1,v1);
+		vout2 = vec_add(v2,v3);
+		vout1 = vec_add(vout1,vout2);
+		
+		vo3 = vec_sld(vo3,vo2,4);
+		vo2 = vec_sld(vo2,vo1,4);
+		vo1 = vec_sld(vo1,vout1,4);
+		
+		v4 = vec_slo(vout4,vc3);
+		v5 = vec_slo(vout4,vc4);
+		v6 = vec_slo(vout4,vc5);
+		vout4 = vec_add(vout4,v4);
+		vout3 = vec_add(v5,v6);
+		vout3 = vec_add(vout3,vout4);
+		
+		vo4 = vec_sld(vo4,vout3,4);
+		
+		vout2 = vec_perm(vout1,vout1,vperm5);
+		vout4 = vec_perm(vout3,vout3,vperm6);
+		vec_ste(vout2,0,output);
+		vec_ste(vout4,0,output2);
+		
+		++output;
+		++output2;
+		++input;
+	}
+	
+	vperm6 = vec_lvsr(0,output2);
+	
+	vout3 = vec_nmsub(vo4,vkernel8,vzero);
+	vout4 = vec_madd(vo1,vkernel7,vout3);
+	
+	v1 = vec_slo(vout4,vc3);
+	v2 = vec_slo(vout4,vc4);
+	v3 = vec_slo(vout4,vc5);
+	vout4 = vec_add(vout4,v1);
+	vout3 = vec_add(v2,v3);
+	vout3 = vec_add(vout3,vout4);
+	
+	vout4 = vec_perm(vout3,vout3,vperm6);
+	vec_ste(vout4,0,output2);
+}
+
+#else
 
 static void
 filterYule(const Float_t * input, Float_t * output, size_t nSamples, const Float_t * const kernel)
@@ -189,7 +440,7 @@ filterButter(const Float_t * input, Float_t * output, size_t nSamples, const Flo
     }
 }
 
-
+#endif
 
 static int ResetSampleFrequency(replaygain_t * rgData, long samplefreq);
 
@@ -323,6 +574,10 @@ AnalyzeSamples(replaygain_t * rgData, const Float_t * left_samples, const Float_
             curright = right_samples + cursamplepos;
         }
 
+#if __ALTIVEC__
+        filterIntegrated(curleft, rgData->lstep + rgData->totsamp, rgData->lout + rgData->totsamp, cursamples, ABYule[rgData->freqindex], ABButter[rgData->freqindex]);
+        filterIntegrated(curright, rgData->rstep + rgData->totsamp, rgData->rout + rgData->totsamp, cursamples, ABYule[rgData->freqindex], ABButter[rgData->freqindex]);
+#else
         YULE_FILTER(curleft, rgData->lstep + rgData->totsamp, cursamples,
                     ABYule[rgData->freqindex]);
         YULE_FILTER(curright, rgData->rstep + rgData->totsamp, cursamples,
@@ -332,6 +587,7 @@ AnalyzeSamples(replaygain_t * rgData, const Float_t * left_samples, const Float_
                       ABButter[rgData->freqindex]);
         BUTTER_FILTER(rgData->rstep + rgData->totsamp, rgData->rout + rgData->totsamp, cursamples,
                       ABButter[rgData->freqindex]);
+#endif
 
         curleft = rgData->lout + rgData->totsamp; /* Get the squared values */
         curright = rgData->rout + rgData->totsamp;

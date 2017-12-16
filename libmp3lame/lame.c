@@ -30,6 +30,9 @@
 # include <config.h>
 #endif
 
+#if __ALTIVEC__
+#include <altivec.h>
+#endif
 
 #include "lame.h"
 #include "machine.h"
@@ -603,7 +606,12 @@ lame_init_params(lame_global_flags * gfp)
         gfc->CPU_features.SSE = 0;
         gfc->CPU_features.SSE2 = 0;
     }
-
+#if __ALTIVEC__
+    /* turn off JAVA mode explicitly */
+    vector unsigned short vscr = vec_mfvscr();
+    vscr = vec_or(vscr,(vector unsigned short)VINIT8(0,0,0,0,0,0,1,0));
+    vec_mtvscr(vscr);
+#endif
 
     cfg->vbr = gfp->VBR;
     cfg->error_protection = gfp->error_protection;

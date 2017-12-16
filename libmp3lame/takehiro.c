@@ -26,6 +26,10 @@
 # include <config.h>
 #endif
 
+#if __ALTIVEC__
+#undef TAKEHIRO_IEEE754_HACK
+#include <altivec.h>
+#endif
 
 #include "lame.h"
 #include "machine.h"
@@ -222,6 +226,150 @@ quantize_lines_xrpow(unsigned int l, FLOAT istep, const FLOAT * xp, int *pi)
 static void
 quantize_lines_xrpow(unsigned int l, FLOAT istep, const FLOAT * xr, int *ix)
 {
+#if __ALTIVEC__
+    vector float v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,va,vb,vistep,vzero;
+    vector signed int vx1,vx2,vx3,vx4,vprev;
+    vector unsigned char vperm1,vperm2;
+    const vector float const1 = (vector float)VINIT4(0.4053964553387788,3.404263724373839,5.465086767819913,1.0);
+    const vector float const2 = (vector float)VINIT4(7.719205369637751,10.93017829043677,0,0);
+#ifndef _ARCH_PPC64
+    unsigned int temp[4] __attribute__ ((aligned (16)));
+#endif
+    float temp2[4] __attribute__ ((aligned (16)));
+    temp2[0] = istep;
+    vistep = vec_ld(0,temp2);
+    vzero = vec_xor(vzero,vzero);
+    vistep = vec_splat(vistep,0);
+    
+    l = l >> 1;
+    
+    vperm1 = vec_lvsl(0,xr);
+    vperm2 = vec_lvsr(0,ix);
+    v1 = vec_ld(0,xr);
+    vx1 = vec_ld(-16,ix);
+    vx2 = vec_ld(0,ix);
+    vprev = vec_perm(vx1,vx2,vec_lvsl(0,ix));
+    for(;l>3;l-=4) {
+        v2 = vec_ld(16,xr);
+        v3 = vec_ld(32,xr);
+        v4 = vec_perm(v1,v2,vperm1);
+        v5 = vec_perm(v2,v3,vperm1);
+        va = vec_madd(v4,vistep,vzero);
+        vb = vec_madd(v5,vistep,vzero);
+        v1 = v3;
+        
+        v2 = vec_floor(va);
+        v3 = vec_floor(vb);
+        v4 = vec_splat(const1,2);
+        v5 = vec_splat(const1,1);
+        v6 = vec_splat(const2,1);
+        v7 = vec_splat(const2,0);
+        v8 = vec_madd(v2,v4,v5);
+        v9 = vec_madd(v3,v4,v5);
+        v10 = vec_madd(v2,v6,v7);
+        v11 = vec_madd(v3,v6,v7);
+        v4 = vec_splat(const1,0);
+        v5 = vec_splat(const1,3);
+        v8 = vec_madd(v8,v2,v4);
+        v9 = vec_madd(v9,v3,v4);
+        v10 = vec_madd(v10,v2,v5);
+        v11 = vec_madd(v11,v3,v5);
+        v6 = vec_re(v10);
+        v7 = vec_re(v11);
+        v10 = vec_nmsub(v10,v6,v5);
+        v11 = vec_nmsub(v11,v7,v5);
+        v10 = vec_madd(v10,v6,v6);
+        v11 = vec_madd(v11,v7,v7);
+        va = vec_madd(v8,v10,va);
+        vb = vec_madd(v9,v11,vb);
+        
+        vx1 = vec_cts(va,0);
+        vx2 = vec_cts(vb,0);
+        
+        vx3 = vec_perm(vprev,vx1,vperm2);
+        vx4 = vec_perm(vx1,vx2,vperm2);
+        vec_st(vx3,0,ix);
+        vec_st(vx4,16,ix);
+        vprev = vx2;
+        xr += 8;
+        ix += 8;
+    }
+    vx1 = vec_ld(0,ix);
+    vx2 = vec_ld(16,ix);
+    vx3 = vec_perm(vx1,vx2,vec_lvsl(0,ix));
+    vx4 = vec_perm(vprev,vx3,vperm2);
+    vec_st(vx4,0,ix);
+    
+#if _ARCH_PPC64
+    for(;l>1;l-=2) {
+        FLOAT   x0, x1, x2, x3;
+        int     rx0, rx1, rx2, rx3;
+
+        x0 = *xr++ * istep;
+        x1 = *xr++ * istep;
+        XRPOW_FTOI(x0, rx0);
+        x2 = *xr++ * istep;
+        XRPOW_FTOI(x1, rx1);
+        x3 = *xr++ * istep;
+        XRPOW_FTOI(x2, rx2);
+        x0 += QUANTFAC(rx0);
+        XRPOW_FTOI(x3, rx3);
+        x1 += QUANTFAC(rx1);
+        XRPOW_FTOI(x0, *ix++);
+        x2 += QUANTFAC(rx2);
+        XRPOW_FTOI(x1, *ix++);
+        x3 += QUANTFAC(rx3);
+        XRPOW_FTOI(x2, *ix++);
+        XRPOW_FTOI(x3, *ix++);
+    }
+#else
+    for(;l>1;l-=2) {
+        v2 = vec_ld(16,xr);
+        v4 = vec_perm(v1,v2,vperm1);
+        v1 = v2;
+        va = vec_madd(v4,vistep,vzero);
+        vx1 = vec_cts(va,0);
+        vec_st((vector unsigned int)vx1,0,temp);
+        v2 = vec_lde(0,adj43+temp[0]);
+        v3 = vec_lde(0,adj43+temp[1]);
+        v4 = vec_lde(0,adj43+temp[2]);
+        v5 = vec_lde(0,adj43+temp[3]);
+        v6 = vec_perm(v2,v2,vec_lvsl(0,adj43+temp[0]));
+        v7 = vec_perm(v3,v3,vec_lvsl(-4,adj43+temp[1]));
+        v8 = vec_perm(v4,v4,vec_lvsl(-8,adj43+temp[2]));
+        v9 = vec_perm(v5,v5,vec_lvsl(-12,adj43+temp[3]));
+        v6 = vec_or(v6,v7);
+        v6 = vec_or(v6,v8);
+        v6 = vec_or(v6,v9);
+        va = vec_add(va,v6);
+        vx1 = vec_cts(va,0);
+        vx3 = vec_perm(vprev,vx1,vperm2);
+        vec_st(vx3,0,ix);
+        vprev = vx1;
+        xr += 4;
+        ix += 4;
+    }
+    vx1 = vec_ld(0,ix);
+    vx2 = vec_ld(16,ix);
+    vx3 = vec_perm(vx1,vx2,vec_lvsl(0,ix));
+    vx4 = vec_perm(vprev,vx3,vperm2);
+    vec_st(vx4,0,ix);
+#endif
+    
+    if (l) {
+        FLOAT   x0, x1;
+        int     rx0, rx1;
+
+        x0 = *xr++ * istep;
+        x1 = *xr++ * istep;
+        XRPOW_FTOI(x0, rx0);
+        XRPOW_FTOI(x1, rx1);
+        x0 += QUANTFAC(rx0);
+        x1 += QUANTFAC(rx1);
+        XRPOW_FTOI(x0, *ix++);
+        XRPOW_FTOI(x1, *ix++);
+    }
+#else
     unsigned int remaining;
 
     assert(l > 0);
@@ -263,7 +411,7 @@ quantize_lines_xrpow(unsigned int l, FLOAT istep, const FLOAT * xr, int *ix)
         XRPOW_FTOI(x0, *ix++);
         XRPOW_FTOI(x1, *ix++);
     }
-
+#endif
 }
 
 
@@ -420,6 +568,60 @@ quantize_xrpow(const FLOAT * xp, int *pi, FLOAT istep, gr_info const *const cod_
 /*	      ix_max							 */
 /*************************************************************************/
 
+#if __ALTIVEC__
+int
+ix_max_vec(const int *ix, const int *end)
+{
+    int vresult[4] __attribute__ ((aligned (16)));
+    int max1=0, max2=0;
+    vector signed int v1, v2, v3, v4, v5, v6, v7, vmax;
+    vector unsigned char vmask,vc1,vc2,vc3,vc4;
+    
+    if(end - ix < 8) goto normal;
+    int i = (end-ix)/4;
+    int remain = (end-ix)%4;
+    vc1 = vec_splat_u8(1);
+    vc2 = vec_splat_u8(5);
+    vc3 = vec_sl(vc1,vc2);
+    vc4 = vec_sl(vc3,vc1);
+    
+    v1 = vec_ld(0, ix);
+    vmask = vec_lvsl(0, ix);
+    vmax = vec_xor(vmax, vmax);
+    
+    while(i--) {
+        v2 = vec_ld(16, ix);
+        v3 = vec_perm(v1, v2, vmask);
+        v1 = v2;
+        vmax = vec_max(vmax,v3);
+        ix += 4;
+    }
+    
+    v4 = vec_slo(vmax,vc3);
+    v5 = vec_max(vmax,v4);
+    v6 = vec_slo(v5,vc4);
+    v7 = vec_max(v5,v6);
+    vec_st(v7,0,vresult);
+    
+    max1 = vresult[0];
+    if(!remain) return max1;
+    //max2 = vresult[2];
+    /*if(vresult[2] > max1) max1 = vresult[2];
+    if(vresult[3] > max2) max2 = vresult[3];*/
+    
+  normal:
+    
+    do{
+        int x1 = *ix++;
+        int x2 = *ix++;
+        if (max1 < x1) max1 = x1;
+        if (max2 < x2) max2 = x2;
+    } while (ix < end);
+    if(max1 < max2) max1 = max2;
+    
+    return max1;
+}
+#else
 static int
 ix_max(const int *ix, const int *end)
 {
@@ -438,14 +640,14 @@ ix_max(const int *ix, const int *end)
         max1 = max2;
     return max1;
 }
+#endif
 
 
 
 
 
 
-
-
+#if !defined(__ALTIVEC__) || (defined(__ALTIVEC__) && !defined(_ARCH_PPC64))
 static int
 count_bit_ESC(const int *ix, const int *const end, int t1, const int t2, unsigned int *const s)
 {
@@ -481,6 +683,7 @@ count_bit_ESC(const int *ix, const int *const end, int t1, const int t2, unsigne
     *s += sum;
     return t1;
 }
+#endif
 
 
 static int
@@ -507,6 +710,7 @@ static const int huf_tbl_noESC[] = {
 };
 
 
+#if !defined(__ALTIVEC__)
 static int
 count_bit_noESC_from2(const int *ix, const int *end, int max, unsigned int *s)
 {
@@ -533,6 +737,7 @@ count_bit_noESC_from2(const int *ix, const int *end, int max, unsigned int *s)
     *s += sum;
     return t1;
 }
+#endif
 
 
 inline static int
@@ -572,6 +777,651 @@ count_bit_noESC_from3(const int *ix, const int *end, int max, unsigned int * s)
     return t;  
 }
 
+#if __ALTIVEC__
+#if _ARCH_PPC64
+static int
+count_bit_ESC_altivec(const int *ix, const int *const end, int t1, const int t2, int *const s)
+{
+    /* ESC-table is used */
+    int const linbits = ht[t1].xlen * 65536 + ht[t2].xlen;
+    int     sum = 0, sum2;
+    vector signed int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
+    vector unsigned int vsum;
+    vector unsigned char vmask,vperm1,vperm2,vshamt;
+    vector unsigned char vzero,vs1,vs2,vs3,vs4,vs5,vs6,vlimit1,vlimit2,vone;
+    unsigned char tmp[16] __attribute__ ((aligned (16)));
+    unsigned int tmp2[4] __attribute__ ((aligned (16)));
+    
+    vperm1 = (vector unsigned char)VINIT16(0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27);
+    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
+    vlimit1 = vec_splat_u8(14);
+    vlimit2 = vec_splat_u8(15);
+    vone = vec_splat_u8(1);
+    vshamt = vec_splat_u8(4);
+    vzero = vec_xor(vzero,vzero);
+    vsum = vec_xor(vsum,vsum);
+    
+    if((int)(end - ix) < 32) goto normal;
+    v0 = vec_ld(0,ix);
+    vmask = vec_lvsl(0,ix);
+    do {
+        v1 = vec_ld(16,ix);
+        v2 = vec_ld(32,ix);
+        v3 = vec_ld(48,ix);
+        v4 = vec_ld(64,ix);
+        v5 = vec_ld(80,ix);
+        v6 = vec_ld(96,ix);
+        v7 = vec_ld(112,ix);
+        v8 = vec_ld(128,ix);
+        v9 = vec_perm(v0,v1,vmask);
+        v10 = vec_perm(v1,v2,vmask);
+        v11 = vec_perm(v2,v3,vmask);
+        v12 = vec_perm(v3,v4,vmask);
+        v13 = vec_perm(v4,v5,vmask);
+        v14 = vec_perm(v5,v6,vmask);
+        v15 = vec_perm(v6,v7,vmask);
+        v16 = vec_perm(v7,v8,vmask);
+        v0 = v8;
+        v1 = vec_perm(v9,v10,vperm1);
+        v2 = vec_perm(v9,v10,vperm2);
+        v3 = vec_perm(v11,v12,vperm1);
+        v4 = vec_perm(v11,v12,vperm2);
+        v5 = vec_perm(v13,v14,vperm1);
+        v6 = vec_perm(v13,v14,vperm2);
+        v7 = vec_perm(v15,v16,vperm1);
+        v8 = vec_perm(v15,v16,vperm2);
+        
+        v1 = (vector signed int)vec_packs(v1,v3);
+        v2 = (vector signed int)vec_packs(v2,v4);
+        v3 = (vector signed int)vec_packs(v5,v7);
+        v4 = (vector signed int)vec_packs(v6,v8);
+        vs1 = vec_packs((vector unsigned short)v1,(vector unsigned short)v3);
+        vs2 = vec_packs((vector unsigned short)v2,(vector unsigned short)v4);
+        vs3 = vec_sel(vs1,vlimit2,vec_cmpgt(vs1,vlimit1));
+        vs4 = vec_sel(vs2,vlimit2,vec_cmpgt(vs2,vlimit1));
+        vs5 = vec_sel(vzero,vone,vec_cmpgt(vs1,vlimit1));
+        vs6 = vec_sel(vzero,vone,vec_cmpgt(vs2,vlimit1));
+        vs5 = vec_add(vs5,vs6);
+        vsum = vec_sum4s(vs5,vsum);
+        vs3 = vec_sl(vs3,vshamt);
+        vs3 = vec_add(vs3,vs4);
+        vec_st(vs3,0,tmp);
+        
+        sum += largetbl[tmp[0]];
+        sum += largetbl[tmp[1]];
+        sum += largetbl[tmp[2]];
+        sum += largetbl[tmp[3]];
+        sum += largetbl[tmp[4]];
+        sum += largetbl[tmp[5]];
+        sum += largetbl[tmp[6]];
+        sum += largetbl[tmp[7]];
+        sum += largetbl[tmp[8]];
+        sum += largetbl[tmp[9]];
+        sum += largetbl[tmp[10]];
+        sum += largetbl[tmp[11]];
+        sum += largetbl[tmp[12]];
+        sum += largetbl[tmp[13]];
+        sum += largetbl[tmp[14]];
+        sum += largetbl[tmp[15]];
+        
+        ix += 32;
+    } while(ix < end-31);
+    
+    vsum = (vector unsigned int)vec_sums((vector signed int)vsum,(vector signed int)vzero);
+    vec_st(vsum,0,tmp2);
+    sum += tmp2[3] * linbits;
+    
+    while (ix < end) {
+        unsigned int x = *ix++;
+        unsigned int y = *ix++;
+
+        if (x >= 15u) {
+            x = 15u;
+            sum += linbits;
+        }
+        if (y >= 15u) {
+            y = 15u;
+            sum += linbits;
+        }
+        x <<= 4u;
+        x += y;
+        sum += largetbl[x];
+    }
+    goto end;
+    
+normal:
+    do {
+        unsigned int x = *ix++;
+        unsigned int y = *ix++;
+
+        if (x >= 15u) {
+            x = 15u;
+            sum += linbits;
+        }
+        if (y >= 15u) {
+            y = 15u;
+            sum += linbits;
+        }
+        x <<= 4u;
+        x += y;
+        sum += largetbl[x];
+    } while (ix < end);
+
+end:
+    sum2 = sum & 0xffffu;
+    sum >>= 16u;
+
+    if (sum > sum2) {
+        sum = sum2;
+        t1 = t2;
+    }
+
+    *s += sum;
+    return t1;
+}
+#endif
+
+inline static int
+count_bit_noESC_from2_altivec1(const int *ix, const int *end, int max, unsigned int *s)
+{
+    int t1 = huf_tbl_noESC[max - 1];
+    /* No ESC-words */
+    unsigned int sum = 0;
+    int sum1, sum2;
+    const unsigned int xlen = 3;
+    const unsigned int *table = table23;
+    vector signed int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
+    vector signed int vx1,vx2,vx3,vx4,vx5,vx6,vxlen,vzero,vsum1,vsum2;
+    vector unsigned char vmask,vperm1,vperm2,vx;
+    vector unsigned char vhlen1,vhlen2;
+    vector signed char vs1,vs2;
+    
+    vhlen1 = (vector unsigned char)VINIT16(1,4,7,4,5,7,6,7,8,0,0,0,0,0,0,0);
+    vhlen2 = (vector unsigned char)VINIT16(2,3,7,4,4,7,6,7,8,0,0,0,0,0,0,0);
+    vperm1 = (vector unsigned char)VINIT16(0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27);
+    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
+    vxlen = vec_splat_s32(3);
+    vzero = vec_xor(vzero,vzero);
+    vsum1 = vec_xor(vsum1,vsum1);
+    vsum2 = vec_xor(vsum2,vsum2);
+    
+    if((int)(end - ix) < 32) goto normal;
+    v0 = vec_ld(0,ix);
+    vmask = vec_lvsl(0,ix);
+    do {
+        v1 = vec_ld(16,ix);
+        v2 = vec_ld(32,ix);
+        v3 = vec_ld(48,ix);
+        v4 = vec_ld(64,ix);
+        v5 = vec_ld(80,ix);
+        v6 = vec_ld(96,ix);
+        v7 = vec_ld(112,ix);
+        v8 = vec_ld(128,ix);
+        v9 = vec_perm(v0,v1,vmask);
+        v10 = vec_perm(v1,v2,vmask);
+        v11 = vec_perm(v2,v3,vmask);
+        v12 = vec_perm(v3,v4,vmask);
+        v13 = vec_perm(v4,v5,vmask);
+        v14 = vec_perm(v5,v6,vmask);
+        v15 = vec_perm(v6,v7,vmask);
+        v16 = vec_perm(v7,v8,vmask);
+        v0 = v8;
+        v1 = vec_perm(v9,v10,vperm1);
+        v2 = vec_perm(v9,v10,vperm2);
+        v3 = vec_perm(v11,v12,vperm1);
+        v4 = vec_perm(v11,v12,vperm2);
+        v5 = vec_perm(v13,v14,vperm1);
+        v6 = vec_perm(v13,v14,vperm2);
+        v7 = vec_perm(v15,v16,vperm1);
+        v8 = vec_perm(v15,v16,vperm2);
+        vx1 = (vector signed int)vec_mladd((vector unsigned short)v1,(vector unsigned short)vxlen,(vector unsigned short)v2);
+        vx2 = (vector signed int)vec_mladd((vector unsigned short)v3,(vector unsigned short)vxlen,(vector unsigned short)v4);
+        vx3 = (vector signed int)vec_pack(vx1,vx2);
+        vx4 = (vector signed int)vec_mladd((vector unsigned short)v5,(vector unsigned short)vxlen,(vector unsigned short)v6);
+        vx5 = (vector signed int)vec_mladd((vector unsigned short)v7,(vector unsigned short)vxlen,(vector unsigned short)v8);
+        vx6 = (vector signed int)vec_pack(vx4,vx5);
+        vx = (vector unsigned char)vec_pack((vector unsigned short)vx3,(vector unsigned short)vx6);
+        
+        vs1 = (vector signed char)vec_perm(vhlen1,vhlen1,vx);
+        vs2 = (vector signed char)vec_perm(vhlen2,vhlen2,vx);
+        
+        vsum1 = vec_sum4s(vs1,vsum1);
+        vsum2 = vec_sum4s(vs2,vsum2);
+        
+        ix += 32;
+    } while(ix < end-31);
+    
+    vsum1 = vec_sums(vsum1,vzero);
+    vsum2 = vec_sums(vsum2,vzero);
+    
+    vsum1 = vec_perm(vsum1,vsum1,vec_lvsr(4,&sum1));
+    vsum2 = vec_perm(vsum2,vsum2,vec_lvsr(4,&sum2));
+    vec_ste(vsum1,0,&sum1);
+    vec_ste(vsum2,0,&sum2);
+    
+    while (ix < end) {
+        unsigned int const x0 = *ix++;
+        unsigned int const x1 = *ix++;
+        sum += table[ x0 * xlen + x1 ];
+    }
+    
+    sum2 += sum & 0xffffu;
+    sum = (sum>>16u) + sum1;
+    
+    goto end;
+    
+normal:
+    do {
+        unsigned int const x0 = *ix++;
+        unsigned int const x1 = *ix++;
+        sum += table[ x0 * xlen + x1 ];
+    } while (ix < end);
+
+    sum2 = sum & 0xffffu;
+    sum >>= 16u;
+
+end:
+    if (sum > sum2) {
+        sum = sum2;
+        t1++;
+    }
+
+    *s += sum;
+    return t1;
+}
+
+inline static int
+count_bit_noESC_from2_altivec2(const int *ix, const int *end, int max, unsigned int *s)
+{
+    int t1 = huf_tbl_noESC[max - 1];
+    /* No ESC-words */
+    unsigned int sum = 0;
+    int sum1, sum2;
+    const unsigned int xlen = 4;
+    const unsigned int *table = table56;
+    vector signed int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
+    vector signed int vx1,vx2,vx3,vx4,vx5,vx6,vxlen,vzero,vsum1,vsum2;
+    vector unsigned char vmask,vperm1,vperm2,vx;
+    vector unsigned char vhlen1,vhlen2;
+    vector signed char vs1,vs2;
+    
+    vhlen1 = (vector unsigned char)VINIT16(1,4,7,8,4,5,8,9,7,8,9,10,8,8,9,10);
+    vhlen2 = (vector unsigned char)VINIT16(3,4,6,8,4,4,6,7,5,6,7,8,7,7,8,9);
+    vperm1 = (vector unsigned char)VINIT16(0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27);
+    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
+    vxlen = vec_splat_s32(4);
+    vzero = vec_xor(vzero,vzero);
+    vsum1 = vec_xor(vsum1,vsum1);
+    vsum2 = vec_xor(vsum2,vsum2);
+    
+    if((int)(end - ix) < 32) goto normal;
+    v0 = vec_ld(0,ix);
+    vmask = vec_lvsl(0,ix);
+    do {
+        v1 = vec_ld(16,ix);
+        v2 = vec_ld(32,ix);
+        v3 = vec_ld(48,ix);
+        v4 = vec_ld(64,ix);
+        v5 = vec_ld(80,ix);
+        v6 = vec_ld(96,ix);
+        v7 = vec_ld(112,ix);
+        v8 = vec_ld(128,ix);
+        v9 = vec_perm(v0,v1,vmask);
+        v10 = vec_perm(v1,v2,vmask);
+        v11 = vec_perm(v2,v3,vmask);
+        v12 = vec_perm(v3,v4,vmask);
+        v13 = vec_perm(v4,v5,vmask);
+        v14 = vec_perm(v5,v6,vmask);
+        v15 = vec_perm(v6,v7,vmask);
+        v16 = vec_perm(v7,v8,vmask);
+        v0 = v8;
+        v1 = vec_perm(v9,v10,vperm1);
+        v2 = vec_perm(v9,v10,vperm2);
+        v3 = vec_perm(v11,v12,vperm1);
+        v4 = vec_perm(v11,v12,vperm2);
+        v5 = vec_perm(v13,v14,vperm1);
+        v6 = vec_perm(v13,v14,vperm2);
+        v7 = vec_perm(v15,v16,vperm1);
+        v8 = vec_perm(v15,v16,vperm2);
+        
+        vx1 = (vector signed int)vec_mladd((vector unsigned short)v1,(vector unsigned short)vxlen,(vector unsigned short)v2);
+        vx2 = (vector signed int)vec_mladd((vector unsigned short)v3,(vector unsigned short)vxlen,(vector unsigned short)v4);
+        vx3 = (vector signed int)vec_pack(vx1,vx2);
+        vx4 = (vector signed int)vec_mladd((vector unsigned short)v5,(vector unsigned short)vxlen,(vector unsigned short)v6);
+        vx5 = (vector signed int)vec_mladd((vector unsigned short)v7,(vector unsigned short)vxlen,(vector unsigned short)v8);
+        vx6 = (vector signed int)vec_pack(vx4,vx5);
+        vx = (vector unsigned char)vec_pack((vector unsigned short)vx3,(vector unsigned short)vx6);
+        
+        vs1 = (vector signed char)vec_perm(vhlen1,vhlen1,vx);
+        vs2 = (vector signed char)vec_perm(vhlen2,vhlen2,vx);
+        
+        vsum1 = vec_sum4s(vs1,vsum1);
+        vsum2 = vec_sum4s(vs2,vsum2);
+        
+        ix += 32;
+    } while(ix < end-31);
+    
+    vsum1 = vec_sums(vsum1,vzero);
+    vsum2 = vec_sums(vsum2,vzero);
+    
+    vsum1 = vec_perm(vsum1,vsum1,vec_lvsr(4,&sum1));
+    vsum2 = vec_perm(vsum2,vsum2,vec_lvsr(4,&sum2));
+    vec_ste(vsum1,0,&sum1);
+    vec_ste(vsum2,0,&sum2);
+
+    while (ix < end) {
+        unsigned int const x0 = *ix++;
+        unsigned int const x1 = *ix++;
+        sum += table[ x0 * xlen + x1 ];
+    }
+    
+    sum2 += sum & 0xffffu;
+    sum = (sum>>16u) + sum1;
+    
+    goto end;
+    
+normal:
+    do {
+        unsigned int const x0 = *ix++;
+        unsigned int const x1 = *ix++;
+        sum += table[ x0 * xlen + x1 ];
+    } while (ix < end);
+
+    sum2 = sum & 0xffffu;
+    sum >>= 16u;
+
+end:
+    if (sum > sum2) {
+        sum = sum2;
+        t1++;
+    }
+
+    *s += sum;
+    return t1;
+}
+
+inline static int
+count_bit_noESC_from3_altivec1(const int *ix, const int *const end, int max, unsigned int *s)
+{
+    int t1 = huf_tbl_noESC[max - 1];
+    /* No ESC-words */
+    unsigned int sum1 = 0;
+    unsigned int sum2 = 0;
+    unsigned int sum3 = 0;
+    const unsigned int xlen = 6;
+    const uint8_t *const hlen1 = ht[7].hlen;
+    const uint8_t *const hlen2 = ht[8].hlen;
+    const uint8_t *const hlen3 = ht[9].hlen;
+    int     t;
+    vector signed int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
+    vector signed int vx1,vx2,vx3,vx4,vx5,vx6,vxlen,vzero,vsum1,vsum2,vsum3;
+    vector unsigned char vmask,vperm1,vperm2,vx,v31;
+    vector unsigned char vhlen11,vhlen12,vhlen13,vhlen21,vhlen22,vhlen23,vhlen31,vhlen32,vhlen33;
+    vector signed char vs1,vs2,vs3;
+    
+    vhlen11 = (vector unsigned char)VINIT16(1,4,7,9,9,10,4,6,8,9,9,10,7,7,9,10);
+    vhlen12 = (vector unsigned char)VINIT16(10,11,8,9,10,11,11,11,8,9,10,11,11,12,9,10);
+    vhlen13 = (vector unsigned char)VINIT16(11,12,12,12,0,0,0,0,0,0,0,0,0,0,0,0);
+    vhlen21 = (vector unsigned char)VINIT16(2,4,7,9,9,10,4,4,6,10,10,10,7,6,8,10);
+    vhlen22 = (vector unsigned char)VINIT16(10,11,9,10,10,11,11,12,9,9,10,11,12,12,10,10);
+    vhlen23 = (vector unsigned char)VINIT16(11,11,13,13,0,0,0,0,0,0,0,0,0,0,0,0);
+    vhlen31 = (vector unsigned char)VINIT16(3,4,6,7,9,10,4,5,6,7,8,10,5,6,7,8);
+    vhlen32 = (vector unsigned char)VINIT16(9,10,7,7,8,9,9,10,8,8,9,9,10,11,9,9);
+    vhlen33 = (vector unsigned char)VINIT16(10,10,11,11,0,0,0,0,0,0,0,0,0,0,0,0);
+    vperm1 = (vector unsigned char)VINIT16(0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27);
+    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
+    v31 = (vector unsigned char)VINIT16ALL(31);
+    vxlen = vec_splat_s32(6);
+    vzero = vec_xor(vzero,vzero);
+    vsum1 = vec_xor(vsum1,vsum1);
+    vsum2 = vec_xor(vsum2,vsum2);
+    vsum3 = vec_xor(vsum3,vsum3);
+    
+    if((int)(end - ix) < 32) goto normal;
+    //int *end2 = ix + 32*((int)(end - ix)/32);
+    v0 = vec_ld(0,ix);
+    vmask = vec_lvsl(0,ix);
+    do {
+        v1 = vec_ld(16,ix);
+        v2 = vec_ld(32,ix);
+        v3 = vec_ld(48,ix);
+        v4 = vec_ld(64,ix);
+        v5 = vec_ld(80,ix);
+        v6 = vec_ld(96,ix);
+        v7 = vec_ld(112,ix);
+        v8 = vec_ld(128,ix);
+        v9 = vec_perm(v0,v1,vmask);
+        v10 = vec_perm(v1,v2,vmask);
+        v11 = vec_perm(v2,v3,vmask);
+        v12 = vec_perm(v3,v4,vmask);
+        v13 = vec_perm(v4,v5,vmask);
+        v14 = vec_perm(v5,v6,vmask);
+        v15 = vec_perm(v6,v7,vmask);
+        v16 = vec_perm(v7,v8,vmask);
+        v0 = v8;
+        v1 = vec_perm(v9,v10,vperm1);
+        v2 = vec_perm(v9,v10,vperm2);
+        v3 = vec_perm(v11,v12,vperm1);
+        v4 = vec_perm(v11,v12,vperm2);
+        v5 = vec_perm(v13,v14,vperm1);
+        v6 = vec_perm(v13,v14,vperm2);
+        v7 = vec_perm(v15,v16,vperm1);
+        v8 = vec_perm(v15,v16,vperm2);
+        vx1 = (vector signed int)vec_mladd((vector unsigned short)v1,(vector unsigned short)vxlen,(vector unsigned short)v2);
+        vx2 = (vector signed int)vec_mladd((vector unsigned short)v3,(vector unsigned short)vxlen,(vector unsigned short)v4);
+        vx3 = (vector signed int)vec_pack(vx1,vx2);
+        vx4 = (vector signed int)vec_mladd((vector unsigned short)v5,(vector unsigned short)vxlen,(vector unsigned short)v6);
+        vx5 = (vector signed int)vec_mladd((vector unsigned short)v7,(vector unsigned short)vxlen,(vector unsigned short)v8);
+        vx6 = (vector signed int)vec_pack(vx4,vx5);
+        vx = (vector unsigned char)vec_pack((vector unsigned short)vx3,(vector unsigned short)vx6);
+        
+        v1 = (vector signed int)vec_perm(vhlen11,vhlen12,vx);
+        v2 = (vector signed int)vec_perm(vhlen13,vhlen13,vx);
+        v3 = (vector signed int)vec_perm(vhlen21,vhlen22,vx);
+        v4 = (vector signed int)vec_perm(vhlen23,vhlen23,vx);
+        v5 = (vector signed int)vec_perm(vhlen31,vhlen32,vx);
+        v6 = (vector signed int)vec_perm(vhlen33,vhlen33,vx);
+        v7 = (vector signed int)vec_cmpgt(vx,v31);
+        vs1 = (vector signed char)vec_sel(v1,v2,(vector unsigned int)v7);
+        vs2 = (vector signed char)vec_sel(v3,v4,(vector unsigned int)v7);
+        vs3 = (vector signed char)vec_sel(v5,v6,(vector unsigned int)v7);
+        
+        vsum1 = vec_sum4s(vs1,vsum1);
+        vsum2 = vec_sum4s(vs2,vsum2);
+        vsum3 = vec_sum4s(vs3,vsum3);
+        
+        ix += 32;
+    } while(ix < end-31);
+    
+    vsum1 = vec_sums(vsum1,vzero);
+    vsum2 = vec_sums(vsum2,vzero);
+    vsum3 = vec_sums(vsum3,vzero);
+    
+    vsum1 = vec_perm(vsum1,vsum1,vec_lvsr(4,&sum1));
+    vsum2 = vec_perm(vsum2,vsum2,vec_lvsr(4,&sum2));
+    vsum3 = vec_perm(vsum3,vsum3,vec_lvsr(4,&sum3));
+    vec_ste(vsum1,0,(signed int *)&sum1);
+    vec_ste(vsum2,0,(signed int *)&sum2);
+    vec_ste(vsum3,0,(signed int *)&sum3);
+    
+    while (ix < end) {
+        int x = ix[0] * xlen + ix[1];
+        ix += 2;
+        sum1 += hlen1[x];
+        sum2 += hlen2[x];
+        sum3 += hlen3[x];
+    }
+    goto end;
+    
+  normal:
+    
+    do {
+        int x = ix[0] * xlen + ix[1];
+        ix += 2;
+        sum1 += hlen1[x];
+        sum2 += hlen2[x];
+        sum3 += hlen3[x];
+    } while (ix < end);
+    
+  end:
+    
+    t = t1;
+    if (sum1 > sum2) {
+        sum1 = sum2;
+        t++;
+    }
+    if (sum1 > sum3) {
+        sum1 = sum3;
+        t = t1+2;
+    }
+    *s += sum1;
+    
+    return t;
+}
+
+inline static int
+count_bit_noESC_from3_altivec2(const int *ix, const int *const end, int max, unsigned int *s)
+{
+    int t1 = huf_tbl_noESC[max - 1];
+    /* No ESC-words */
+    unsigned int sum1 = 0;
+    unsigned int sum2 = 0;
+    unsigned int sum3 = 0;
+    const unsigned int xlen = 8;
+    const uint8_t *const hlen1 = ht[10].hlen;
+    const uint8_t *const hlen2 = ht[11].hlen;
+    const uint8_t *const hlen3 = ht[12].hlen;
+    int     t;
+    vector signed int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9,v10,v11,v12,v13,v14,v15,v16;
+    vector signed int vx1,vx2,vx3,vx4,vx5,vx6,vxlen,vzero,vsum1,vsum2,vsum3;
+    vector unsigned char vmask,vperm1,vperm2,vx,v31;
+    vector unsigned char vhlen11,vhlen12,vhlen13,vhlen14,vhlen21,vhlen22,vhlen23,vhlen24,vhlen31,vhlen32,vhlen33,vhlen34;
+    vector signed char vs1,vs2,vs3;
+    
+    vhlen11 = (vector unsigned char)VINIT16( 1,  4,  7,  9, 10, 10, 10, 11, 4,  6,  8,  9, 10, 11, 10, 10);
+    vhlen12 = (vector unsigned char)VINIT16( 7,  8,  9, 10, 11, 12, 11, 11, 8,  9, 10, 11, 12, 12, 11, 12);
+    vhlen13 = (vector unsigned char)VINIT16( 9, 10, 11, 12, 12, 12, 12, 12,10, 11, 12, 12, 13, 13, 12, 13);
+    vhlen14 = (vector unsigned char)VINIT16( 9, 10, 11, 12, 12, 12, 13, 13,10, 10, 11, 12, 12, 13, 13, 13);
+    vhlen21 = (vector unsigned char)VINIT16( 2,  4,  6,  8,  9, 10,  9, 10, 4,  5,  6,  8, 10, 10,  9, 10);
+    vhlen22 = (vector unsigned char)VINIT16( 6,  7,  8,  9, 10, 11, 10, 10, 8,  8,  9, 11, 10, 12, 10, 11);
+    vhlen23 = (vector unsigned char)VINIT16( 9, 10, 10, 11, 11, 12, 11, 12, 9, 10, 11, 12, 12, 13, 12, 13);
+    vhlen24 = (vector unsigned char)VINIT16( 9,  9,  9, 10, 11, 12, 12, 12, 9,  9, 10, 11, 12, 12, 12, 12);
+    vhlen31 = (vector unsigned char)VINIT16( 4,  4,  6,  8,  9, 10, 10, 10, 4,  5,  6,  7,  9,  9, 10, 10);
+    vhlen32 = (vector unsigned char)VINIT16( 6,  6,  7,  8,  9, 10,  9, 10, 7,  7,  8,  8,  9, 10, 10, 10);
+    vhlen33 = (vector unsigned char)VINIT16( 8,  8,  9,  9, 10, 10, 10, 11, 9,  9, 10, 10, 10, 11, 10, 11);
+    vhlen34 = (vector unsigned char)VINIT16( 9,  9,  9, 10, 10, 11, 11, 12,10, 10, 10, 11, 11, 11, 11, 12);
+    vperm1 = (vector unsigned char)VINIT16(0,1,2,3,8,9,10,11,16,17,18,19,24,25,26,27);
+    vperm2 = (vector unsigned char)VINIT16(4,5,6,7,12,13,14,15,20,21,22,23,28,29,30,31);
+    v31 = (vector unsigned char)VINIT16ALL(31);
+    vxlen = vec_splat_s32(8);
+    vzero = vec_xor(vzero,vzero);
+    vsum1 = vec_xor(vsum1,vsum1);
+    vsum2 = vec_xor(vsum2,vsum2);
+    vsum3 = vec_xor(vsum3,vsum3);
+    
+    if((int)(end - ix) < 32) goto normal;
+    //int *end2 = ix + 32*((int)(end - ix)/32);
+    v0 = vec_ld(0,ix);
+    vmask = vec_lvsl(0,ix);
+    do {
+        v1 = vec_ld(16,ix);
+        v2 = vec_ld(32,ix);
+        v3 = vec_ld(48,ix);
+        v4 = vec_ld(64,ix);
+        v5 = vec_ld(80,ix);
+        v6 = vec_ld(96,ix);
+        v7 = vec_ld(112,ix);
+        v8 = vec_ld(128,ix);
+        v9 = vec_perm(v0,v1,vmask);
+        v10 = vec_perm(v1,v2,vmask);
+        v11 = vec_perm(v2,v3,vmask);
+        v12 = vec_perm(v3,v4,vmask);
+        v13 = vec_perm(v4,v5,vmask);
+        v14 = vec_perm(v5,v6,vmask);
+        v15 = vec_perm(v6,v7,vmask);
+        v16 = vec_perm(v7,v8,vmask);
+        v0 = v8;
+        v1 = vec_perm(v9,v10,vperm1);
+        v2 = vec_perm(v9,v10,vperm2);
+        v3 = vec_perm(v11,v12,vperm1);
+        v4 = vec_perm(v11,v12,vperm2);
+        v5 = vec_perm(v13,v14,vperm1);
+        v6 = vec_perm(v13,v14,vperm2);
+        v7 = vec_perm(v15,v16,vperm1);
+        v8 = vec_perm(v15,v16,vperm2);
+        
+        vx1 = (vector signed int)vec_mladd((vector unsigned short)v1,(vector unsigned short)vxlen,(vector unsigned short)v2);
+        vx2 = (vector signed int)vec_mladd((vector unsigned short)v3,(vector unsigned short)vxlen,(vector unsigned short)v4);
+        vx3 = (vector signed int)vec_pack(vx1,vx2);
+        vx4 = (vector signed int)vec_mladd((vector unsigned short)v5,(vector unsigned short)vxlen,(vector unsigned short)v6);
+        vx5 = (vector signed int)vec_mladd((vector unsigned short)v7,(vector unsigned short)vxlen,(vector unsigned short)v8);
+        vx6 = (vector signed int)vec_pack(vx4,vx5);
+        vx = (vector unsigned char)vec_pack((vector unsigned short)vx3,(vector unsigned short)vx6);
+        
+        v1 = (vector signed int)vec_perm(vhlen11,vhlen12,vx);
+        v2 = (vector signed int)vec_perm(vhlen13,vhlen14,vx);
+        v3 = (vector signed int)vec_perm(vhlen21,vhlen22,vx);
+        v4 = (vector signed int)vec_perm(vhlen23,vhlen24,vx);
+        v5 = (vector signed int)vec_perm(vhlen31,vhlen32,vx);
+        v6 = (vector signed int)vec_perm(vhlen33,vhlen34,vx);
+        v7 = (vector signed int)vec_cmpgt(vx,v31);
+        vs1 = (vector signed char)vec_sel(v1,v2,(vector unsigned int)v7);
+        vs2 = (vector signed char)vec_sel(v3,v4,(vector unsigned int)v7);
+        vs3 = (vector signed char)vec_sel(v5,v6,(vector unsigned int)v7);
+        
+        vsum1 = vec_sum4s(vs1,vsum1);
+        vsum2 = vec_sum4s(vs2,vsum2);
+        vsum3 = vec_sum4s(vs3,vsum3);
+        
+        ix += 32;
+    } while(ix < end-31);
+    
+    vsum1 = vec_sums(vsum1,vzero);
+    vsum2 = vec_sums(vsum2,vzero);
+    vsum3 = vec_sums(vsum3,vzero);
+    
+    vsum1 = vec_perm(vsum1,vsum1,vec_lvsr(4,&sum1));
+    vsum2 = vec_perm(vsum2,vsum2,vec_lvsr(4,&sum2));
+    vsum3 = vec_perm(vsum3,vsum3,vec_lvsr(4,&sum3));
+    vec_ste(vsum1,0,(signed int *)&sum1);
+    vec_ste(vsum2,0,(signed int *)&sum2);
+    vec_ste(vsum3,0,(signed int *)&sum3);
+    
+    while (ix < end) {
+        int x = ix[0] * xlen + ix[1];
+        ix += 2;
+        sum1 += hlen1[x];
+        sum2 += hlen2[x];
+        sum3 += hlen3[x];
+    }
+    goto end;
+    
+  normal:
+    
+    do {
+        int x = ix[0] * xlen + ix[1];
+        ix += 2;
+        sum1 += hlen1[x];
+        sum2 += hlen2[x];
+        sum3 += hlen3[x];
+    } while (ix < end);
+    
+  end:
+    
+    t = t1;
+    if (sum1 > sum2) {
+        sum1 = sum2;
+        t++;
+    }
+    if (sum1 > sum3) {
+        sum1 = sum3;
+        t = t1+2;
+    }
+    *s += sum1;
+    
+    return t;
+}
+#endif
 
 /*************************************************************************/
 /*	      choose table						 */
@@ -599,12 +1449,21 @@ typedef int (*count_fnc)(const int* ix, const int* end, int max, unsigned int* s
 static const count_fnc count_fncs[] = 
 { &count_bit_null
 , &count_bit_noESC
+#if __ALTIVEC__
+, &count_bit_noESC_from2_altivec1
+, &count_bit_noESC_from2_altivec2
+, &count_bit_noESC_from3_altivec1
+, &count_bit_noESC_from3_altivec1
+, &count_bit_noESC_from3_altivec2
+, &count_bit_noESC_from3_altivec2
+#else
 , &count_bit_noESC_from2
 , &count_bit_noESC_from2
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
+#endif
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
 , &count_bit_noESC_from3
@@ -621,7 +1480,11 @@ choose_table_nonMMX(const int *ix, const int *const end, int *const _s)
     unsigned int* s = (unsigned int*)_s;
     unsigned int  max;
     int     choice, choice2;
+#if __ALTIVEC__
+    max = ix_max_vec(ix, end);
+#else
     max = ix_max(ix, end);
+#endif
 
     if (max <= 15) {
       return count_fncs[max](ix, end, max, s);
@@ -643,7 +1506,11 @@ choose_table_nonMMX(const int *ix, const int *const end, int *const _s)
             break;
         }
     }
+#if defined(__ALTIVEC__) && defined(_ARCH_PPC64)
+    return count_bit_ESC_altivec(ix, end, choice, choice2, s);
+#else
     return count_bit_ESC(ix, end, choice, choice2, s);
+#endif
 }
 
 
