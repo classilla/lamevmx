@@ -99,6 +99,22 @@ char   *strchr(), *strrchr();
 static int const lame_alpha_version_enabled = LAME_ALPHA_VERSION;
 static int const internal_opts_enabled = INTERNAL_OPTS;
 
+/* 10.4 does not implement strnlen(), so ... */
+/* Find the length of S, but scan at most MAXLEN characters.  If no '\0'
+   terminator is found within the first MAXLEN characters, return MAXLEN. */
+size_t
+strnlen (s, maxlen)
+     register const char *s;
+     size_t maxlen;
+{
+  register const char *e;
+  size_t n;
+
+  for (e = s, n = 0; *e && n < maxlen; e++, n++)
+    ;
+  return n;
+}
+
 /* GLOBAL VARIABLES.  set by parse_args() */
 /* we need to clean this up */
 

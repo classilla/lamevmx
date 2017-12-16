@@ -7616,6 +7616,7 @@ IFS=$as_save_IFS
 
 fi
 fi
+ac_cv_prog_ac_ct_NMEDIT="true" # doesn't work right on 10.4
 ac_ct_NMEDIT=$ac_cv_prog_ac_ct_NMEDIT
 if test -n "$ac_ct_NMEDIT"; then
   { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_ct_NMEDIT" >&5
@@ -8003,6 +8004,7 @@ if ac_fn_c_try_link "$LINENO"; then :
 else
   lt_cv_ld_exported_symbols_list=no
 fi
+lt_cv_ld_exported_symbols_list=no # doesn't work right on 10.4 ld
 rm -f core conftest.err conftest.$ac_objext \
     conftest$ac_exeext conftest.$ac_ext
 	LDFLAGS=$save_LDFLAGS
