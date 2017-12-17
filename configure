@@ -17605,7 +17605,7 @@ else
 $as_echo "no" >&6; }
 fi
 
-OPTIMIZATION="-arch ppc750 -arch ppc7400 -arch ppc970 -O3 -fomit-frame-pointer -ffast-math -funroll-loops"
+OPTIMIZATION="-arch ppc750 -arch ppc7400 -arch ppc970 -O3 -fomit-frame-pointer -ffast-math -funroll-loops -isysroot /Developer/SDKs/MacOSX10.4u.sdk"
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for debug options" >&5
 $as_echo_n "checking for debug options... " >&6; }

@@ -464,17 +464,18 @@ clean-binPROGRAMS:
 	echo " rm -f" $$list; \
 	rm -f $$list
 
+# The Universal build does not work against the ar-static libs.
 lame$(EXEEXT): $(lame_OBJECTS) $(lame_DEPENDENCIES) $(EXTRA_lame_DEPENDENCIES) 
 	@rm -f lame$(EXEEXT)
-	$(AM_V_CCLD)$(LINK) $(lame_OBJECTS) $(lame_LDADD) $(LIBS)
+	$(AM_V_CCLD)$(LINK) $(lame_OBJECTS) ../libmp3lame/.libs/*.o ../mpglib/*.o -lncurses -liconv -lm
 
 mp3rtp$(EXEEXT): $(mp3rtp_OBJECTS) $(mp3rtp_DEPENDENCIES) $(EXTRA_mp3rtp_DEPENDENCIES) 
 	@rm -f mp3rtp$(EXEEXT)
-	$(AM_V_CCLD)$(LINK) $(mp3rtp_OBJECTS) $(mp3rtp_LDADD) $(LIBS)
+	$(AM_V_CCLD)$(LINK) $(mp3rtp_OBJECTS) ../libmp3lame/.libs/*.o ../mpglib/*.o -lncurses -liconv -lm
 
 mp3x$(EXEEXT): $(mp3x_OBJECTS) $(mp3x_DEPENDENCIES) $(EXTRA_mp3x_DEPENDENCIES) 
 	@rm -f mp3x$(EXEEXT)
-	$(AM_V_CCLD)$(LINK) $(mp3x_OBJECTS) $(mp3x_LDADD) $(LIBS)
+	$(AM_V_CCLD)$(LINK) $(mp3x_OBJECTS) ../libmp3lame/.libs/*.o ../mpglib/*.o -lncurses -liconv -lm
 
 mostlyclean-compile:
 	-rm -f *.$(OBJEXT)

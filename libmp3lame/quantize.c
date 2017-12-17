@@ -46,7 +46,13 @@
 #endif
 
 
-#if (1) // all Power Macs running OS X support frsqrte
+#if _ARCH_PPC64
+static inline double ppc_sqrt(double x) {
+    double y;
+    asm("fsqrt %0,%1" : "=f" (y) : "f" (x));
+    return y;
+}
+#else
 static inline double __frsqrte(double number)
 {
     double y;
@@ -54,7 +60,7 @@ static inline double __frsqrte(double number)
     return y;
 }
 
-static inline double ppc_sqrt(double x) { // G5 has fsqrt. let's use that
+static inline double ppc_sqrt(double x) {
     double y;
     const double halfx = 0.5 * x;
     y = __frsqrte(x);
