@@ -1,6 +1,6 @@
 # [LAMEVMX: LAME Ain't an MP3 Encoder with VMX](http://www.floodgap.com/software/lamevmx/)
 
-LAME 3.100 with [tmkk's patches for AltiVec](http://tmkk.undo.jp/lame/index_e.html), enhanced with additional G5 optimizations and build-system fixes. Maintained by Cameron Kaiser (classilla@floodgap.com).
+A PowerPC-optimized build of LAME 3.100 with [tmkk's patches for AltiVec](http://tmkk.undo.jp/lame/index_e.html), enhanced with additional G5 optimizations and build-system fixes. Intended for lovely Power Macs and not icky Intel Macs, which are better served by the mainline build. Maintained by Cameron Kaiser (classilla@floodgap.com).
 
 How to build (GNU `make` from MacPorts strongly recommended):
 
